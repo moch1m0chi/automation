@@ -1,0 +1,12 @@
+# データ系
+data/
+output/
+*.xlsx
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# 環境
+.env
