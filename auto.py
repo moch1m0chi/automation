@@ -1,7 +1,15 @@
 import os
-from openpyxl import load_workbook
-import re
 from datetime import datetime
+import xlwings as xw
+import re
+import calendar
+    
+input_folder = "data"
+output_folder = "output"
+os.makedirs(output_folder, exist_ok=True)
+
+#正規表現(数値)/(数値)回目をコンパイル
+pattern = re.compile(r"(\d+)/(\d+回目)")
 
 #ファイル名の月繰り上げ
 def increment_month_in_filename(file_name):
@@ -16,95 +24,100 @@ def increment_month_in_filename(file_name):
         return new_name
     else:
         return file_name  # 月が見つからなければそのまま
-    
-#元データを入れるフォルダの指定
-input_folder = "data"
-#処理したファイルの出力先フォルダを指定、なければoutputフォルダを作る
-output_folder = "output"
-os.makedirs(output_folder, exist_ok=True)
 
-#正規表現(数値)/(数値)回目をコンパイル
-pattern = re.compile(r"(\d+)/(\d+回目)")
+def add_one_month(dt):
+    year = dt.year
+    month = dt.month + 1
+    if month > 12:
+        month = 1
+        year += 1
+    try:
+        return dt.replace(year=year, month = month)
+    except:
+        last_day = calendar.monthrange(year, month)[1]
+        return dt.replace(year = year, month= month, day = last_day)
 
+#================================
+#メイン処理
+#================================
+app = xw.App(visible=False)
+app.screen_updating = False
+app.display_alerts = False
 
 for file_name in os.listdir(input_folder):
-    if file_name.endswith((".xlsx", ".xlsm")):
-        file_path = os.path.join(input_folder, file_name)
-        print(f"処理中: {file_name}")
-
-        wb = load_workbook(file_path)
+    if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
+        continue
         
+    file_path = os.path.join(input_folder, file_name)
+    print(f"\n処理開始: {file_name}")
+
+    app = None
+    wb = None
+
+    try:
+        app = xw.App(visible=False)
+        app.screen_updating = False
+
+        try:
+            wb =app.books.open(file_path)
+        except Exception as e:
+            print(f"開けない: {file_name}")
+            print(file_path)
+            print(e)
+            continue
+
         
-        for ws in wb.worksheets:  # 全シート対象
-            # 「報酬額確定合意書」シートがある場合のみ処理
-            if "報酬額確定合意書" in wb.sheetnames:
-                ws_agreement = wb["報酬額確定合意書"]
-    
-            for row in ws_agreement.iter_rows():
-                for cell in row:
-                    value = cell.value
+        if "報酬額確定合意書" in [s.name for s in wb.sheets]:
+            ws = wb.sheets["報酬額確定合意書"]
 
-                    # ■ 日付型の場合
-                    if isinstance(value, datetime):
-                        year = value.year
-                        month = value.month + 1
+            #範囲限定
+            values = ws.range("A1:C50").value
 
-                        if month > 12:
-                            month = 1
-                            year += 1
-
-                        # 日付更新（末日ズレ防止）
+            for r,row in enumerate(values):
+                for c, val in enumerate(row):
+                    if isinstance(val, datetime):
+                        values[r][c] = add_one_month(val)
+                
+                    elif isinstance(val, str):
                         try:
-                            cell.value = value.replace(year=year, month=month)
+                            dt = datetime.strptime(val, "%Y/%m/%d")
+                            values[r][c] = add_one_month(dt).strftime("%Y/%m/%d")
                         except:
-                            # 例：31日 → 翌月に存在しない場合は月末に調整
-                            import calendar
-                            last_day = calendar.monthrange(year, month)[1]
-                            cell.value = value.replace(year=year, month=month, day=last_day)
+                            pass
+            ws.range("A1").value = values        
 
-                    # ■ 文字列（"2026/03/31"）の場合
-                    elif isinstance(value, str):
-                        try:
-                            dt = datetime.strptime(value, "%Y/%m/%d")
-                    
-                            year = dt.year
-                            month = dt.month + 1
+            #================================
+            #n/24回目の更新
+            #================================
+            for ws in wb.sheets:  # 全シート対象
+                values = ws.range("A1:N400").value
 
-                            if month > 12:
-                                month = 1
-                                year += 1
+                for r, row in enumerate(values):  #行を抜き出し
+                    for c, val in enumerate(row):    #抜き出した行のセルを走査
+                        if isinstance(val, str):  #セルの値value)はstr型(文字列)？
+                            match = pattern.search(val)   #Matchオブジェクト
+                            if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
+                                left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
+                                right = match.group(2)
 
-                            try:
-                                new_dt = dt.replace(year=year, month=month)
-                            except:
-                                import calendar
-                                last_day = calendar.monthrange(year, month)[1]
-                                new_dt = dt.replace(year=year, month=month, day=last_day)
-
-                            cell.value = new_dt.strftime("%Y/%m/%d")
-
-                        except:
-                            pass  # 日付じゃない文字列は無視
-
-            #n/24回目をn+1/24回目に書き換える
-            for row in ws.iter_rows():  #行を抜き出し
-                for cell in row:    #抜き出した行のセルを走査
-                    value = cell.value  #valueにセルの値を代入
-
-                    if isinstance(value, str):  #セルの値value)はstr型(文字列)？
-                        match = pattern.search(value)   #Matchオブジェクト
-                        if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
-                            left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
-                            right = match.group(2)
-
-                            new_value = f"{left}/{right}"   #f文字列
-                            print(f"{ws.title} {cell.coordinate}: {value} → {new_value}")
-
-                            cell.value = new_value
+                                values[r][c] = f"{left}/{right}"   #f文字列
+                            #print(f"{ws.name} {cell.address}: {value} → {new_value}")
+                ws.range("A1").value = values
 
         new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
-
         output_path = os.path.join(output_folder, new_file_name)
-        wb.save(output_path)
 
-print("完了！")
+        wb.save(output_path)
+        print(f"保存完了:{new_file_name}")
+
+    except Exception as e:
+        print(f"エラー発生:{file_name}")
+        print(f"内容:{e}")
+
+    finally:
+        if wb:
+            wb.close()
+        if app:
+            app.quit()
+
+print("\n全処理完了！")
