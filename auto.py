@@ -60,6 +60,22 @@ def add_one_month(dt):
     day = min(dt.day, last_day)
     return dt.replace(year = year, month= month, day = day)
 
+def update_usage_text(ws):
+
+    values = ws.used_range.value
+
+    if not values:
+        return
+
+    for r, row in enumerate(values):
+        for c, val in enumerate(row):
+            if isinstance(val, str):
+                new_val = increment_year_month_text(val)
+            
+                if new_val != val:
+                    ws.cells(r+1, c+1).value = new_val
+                    return True
+
 #================================
 #メイン処理
 #================================
@@ -193,23 +209,31 @@ try:
                         ws.cells(base_row+r, base_col+c).value = new_val
                         print(new_val, "を入力")
 
+            # #================================
+            # #2026年〇月利用分を更新
+            # #================================
+            # for ws in wb.sheets:
+            #     values = ws.used_range.value
+
+            #     if not values:
+            #         continue
+
+            #     for r, row in enumerate(values):
+            #         for c, val in enumerate(row):
+            #             if isinstance(val, str):
+            #                 new_val = increment_year_month_text(val)
+
+            #                 if new_val != val:
+            #                     ws.cells(r+1, c+1).value = new_val
+            #                     print(val, "→", new_val)
+
             #================================
-            #2026年〇月利用分を更新
+            #2026年〇月利用分を更新 関数化　動くかな？
             #================================
-            for ws in wb.sheets:
-                values = ws.used_range.value
+            for ws in wb.sheet:
+                if update_usage_text(ws):
+                    print(ws, "を更新")
 
-                if not values:
-                    continue
-
-                for r, row in enumerate(values):
-                    for c, val in enumerate(row):
-                        if isinstance(val, str):
-                            new_val = increment_year_month_text(val)
-
-                            if new_val != val:
-                                ws.cells(r+1, c+1).value = new_val
-                                print(val, "→", new_val)
 
             #================================
             #n/24回目の更新
