@@ -11,7 +11,8 @@ output_folder = os.path.join(base_dir, "output")
 os.makedirs(output_folder, exist_ok=True)
 
 #正規表現(数値)/(数値)回目をコンパイル
-pattern = re.compile(r"(\d+)/(\d+回目)")
+pattern_a = re.compile(r"(\d{4})年(\d{1,2})月利用分")
+pattern_b = re.compile(r"(\d+)/(\d+回目)")
 
 #================================
 #関数
@@ -24,12 +25,29 @@ def increment_month_in_filename(file_name):
     if match:
         month = int(match.group(1))
         new_month = month + 1
+
+        if new_month > 12:
+            new_month = 1
         
         # 置き換え
         new_name = re.sub(r"\d+月", f"{new_month}月", file_name)
         return new_name
     else:
         return file_name  # 月が見つからなければそのまま
+    
+def increment_year_month_text(text):
+    def repl(match):
+        year = int(match.group(1))
+        month = int(match.group(2))
+
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
+        return f"{year}年{month}月利用分"
+
+    return pattern_a.sub(repl, text)
 
 def add_one_month(dt):
     year = dt.year
@@ -49,8 +67,8 @@ app = xw.App(visible=False)
 app.screen_updating = False
 app.display_alerts = False
 
-#target_keywords = ["合意書", "DMM"]
-SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
+target_keywords = ["確定合意書", "DMM（秀", "御請求書"]
+#SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
 DATE_COLUMNS = [1,7]
 
 try:
@@ -73,17 +91,18 @@ try:
             all_data = {}
             
             for ws in wb.sheets:
-                if ws.name not in SOURCE_SHEET:
-                    continue
+                #if ws.name not in SOURCE_SHEET:
+                    #continue
 
-                ur = ws.used_range
-                all_data[ws.name] = {
-                    "values": ur.value,
-                    "formats": ur.number_format,
-                    "formulas": ur.formula,
-                    "base_row": ur.row,
-                    "base_col": ur.column
-                    }
+                if any(k in ws.name for k in target_keywords):
+                    ur = ws.used_range
+                    all_data[ws.name] = {
+                        "values": ur.value,
+                        "formats": ur.number_format,
+                        "formulas": ur.formula,
+                        "base_row": ur.row,
+                        "base_col": ur.column
+                        }
 
             #================================
             #月の繰り上げ
@@ -175,6 +194,24 @@ try:
                         print(new_val, "を入力")
 
             #================================
+            #2026年〇月利用分を更新
+            #================================
+            for ws in wb.sheets:
+                values = ws.used_range.value
+
+                if not values:
+                    continue
+
+                for r, row in enumerate(values):
+                    for c, val in enumerate(row):
+                        if isinstance(val, str):
+                            new_val = increment_year_month_text(val)
+
+                            if new_val != val:
+                                ws.cells(r+1, c+1).value = new_val
+                                print(val, "→", new_val)
+
+            #================================
             #n/24回目の更新
             #================================
             for ws in wb.sheets:
@@ -186,7 +223,7 @@ try:
                 for r, row in enumerate(values):  #行を抜き出し
                     for c, val in enumerate(row):    #抜き出した行のセルを走査
                         if isinstance(val, str):  #セルの値value)はstr型(文字列)？
-                            match = pattern.search(val)   #Matchオブジェクト
+                            match = pattern_b.search(val)   #Matchオブジェクト
                             if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
                                 print("書換え対象:", match.group(0))
                                 left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
