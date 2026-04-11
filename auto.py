@@ -86,6 +86,7 @@ app.display_alerts = False
 target_keywords = ["確定合意書", "DMM（秀", "御請求書"]
 #SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
 DATE_COLUMNS = [1,7]
+DATE_COLUMNS_2 = [4, 10]
 
 try:
     for file_name in os.listdir(input_folder):
@@ -110,6 +111,9 @@ try:
                 #if ws.name not in SOURCE_SHEET:
                     #continue
 
+            #================================
+            #月の繰り上げ
+            #================================
                 if any(k in ws.name for k in target_keywords):
                     ur = ws.used_range
                     all_data[ws.name] = {
@@ -119,10 +123,6 @@ try:
                         "base_row": ur.row,
                         "base_col": ur.column
                         }
-
-            #================================
-            #月の繰り上げ
-            #================================
 
             for ws in wb.sheets:
                 if ws.name not in all_data:
@@ -157,12 +157,13 @@ try:
                 if not isinstance(formulas, list):
                     formulas = [formulas]
                 if not isinstance(formulas[0], list):
-                    formulas = [[f] for f in formats]
+                    formulas = [[f] for f in formulas]
 
-                max_col = max(len(row) for row in values)
+                #max_col = max(len(row) for row in values)
 
                 for r, row in enumerate(values):
-                    for c in range(max_col):
+                    #for c in range(max_col):
+                    for c, val in enumerate(row):
                         val = row[c] if c < len(row) else None
 
                         if val is None:
@@ -187,14 +188,32 @@ try:
                         if not isinstance(val, (datetime, int, float, str)):
                             continue
 
+                        is_date_like = False
+
+                        if isinstance(val, datetime):
+                            is_date_like = True
+
+                        elif isinstance(val, (int, float)):
+                            is_date_like = True  # Excelシリアルの可能性
+
+                        elif isinstance(val, str):
+                            try:
+                                datetime.strptime(val, "%Y/%m/%d")
+                                is_date_like = True
+                            except:
+                                pass
+
+                        if not is_date_like:
+                            continue
+
                         if isinstance(val, datetime):
                             new_val = add_one_month(val)
 
-                        elif isinstance(val, (int, float)):
-                            if not (40000 < val <50000):
-                                continue
-                            dt = datetime(1899, 12, 30) + timedelta(days=val)
-                            new_val = add_one_month(dt)
+                        # elif isinstance(val, (int, float)):
+                        #     if not (40000 < val <50000):
+                        #         continue
+                        #     dt = datetime(1899, 12, 30) + timedelta(days=val)
+                        #     new_val = add_one_month(dt)
                     
                         elif isinstance(val, str):
                             try:
@@ -230,32 +249,78 @@ try:
             #================================
             #2026年〇月利用分を更新 関数化　動くかな？
             #================================
-            for ws in wb.sheet:
+            for ws in wb.sheets:
                 if update_usage_text(ws):
-                    print(ws, "を更新")
-
+                    print(ws.name, "を", new_val, "に更新")
 
             #================================
             #n/24回目の更新
             #================================
+            processed = set()
+            processed_cells = set()
+
             for ws in wb.sheets:
-                values = ws.range("A1:N400").value
+                ur = ws.range("A1:N400")
+                all_data[ws.name] = {
+                    "values": ur.value,
+                    "formulas": ur.formula,
+                }
+
+            for ws in wb.sheets:
+                if ws.name in processed:
+                    continue
+
+                data = all_data[ws.name]
+                values = data["values"]
+                formulas = data["formulas"]
 
                 if not values:
                     continue
+                if formulas is None:
+                    formulas = [[None]*len(values[0]) for _ in range(len(values))]
+
+                if not isinstance(values, list):
+                    continue
+                if not isinstance(values[0], list):
+                    values = [values]
+
+                if not isinstance(formulas, list):
+                    formulas = [formulas]
+                if not isinstance(formulas[0], list):
+                    formulas = [[f] for f in formulas]
 
                 for r, row in enumerate(values):  #行を抜き出し
                     for c, val in enumerate(row):    #抜き出した行のセルを走査
+                        if c not in DATE_COLUMNS_2:
+                            continue
+
+                        formula = formulas[r][c] if r < len(formulas) and c < len(formulas[r]) else None
+                        if isinstance(formula, str) and formula.startswith("="):
+                            print
+                            continue
+
                         if isinstance(val, str):  #セルの値value)はstr型(文字列)？
                             match = pattern_b.search(val)   #Matchオブジェクト
+
                             if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
-                                print("書換え対象:", match.group(0))
+                                cell_key = (ws.name, r, c)
+                                if cell_key in processed_cells:
+                                    continue
+
+                                print("更新対象:", val,"('", ws.name,"'シート", r, "行", c, "列)")
+                                #print(formulas[r][c])
+                                if ws.cells(r+1, c+1).formula.startswith("="):
+                                    print("！", ws.cells(r+1, c+1).formula, "は数式のため処理をスキップ！")
+                                    continue
                                 left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
                                 right = match.group(2)
+                                text = f"{left}/{right}"
+                                result = re.sub(r"(\d+)/(\d+回目)", text, val)
 
-                                ws.cells(r+1, c+1).value = f"{left}/{right}"   #f文字列
-                                if r<3:
-                                    print(f"{left}/{right}に更新")
+                                ws.cells(r+1, c+1).value = result   #f文字列
+                                print("更新完了:", result, "に置き換え")
+                                processed.add(ws.name)
+                                processed_cells.add(cell_key)
 
             new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
             output_path = os.path.join(output_folder, new_file_name)
