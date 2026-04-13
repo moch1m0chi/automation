@@ -60,8 +60,25 @@ def add_one_month(dt):
     day = min(dt.day, last_day)
     return dt.replace(year = year, month= month, day = day)
 
-def update_usage_text(ws):
+def update_month(val):
+    new_val = None
 
+    if isinstance(val, datetime):
+        new_val = add_one_month(val)
+        return new_val
+
+    elif isinstance(val, str):
+        try:
+            dt = datetime.strptime(val, "%Y/%m/%d")
+            new_val = add_one_month(dt)
+            return new_val
+        except:
+            return
+
+    else:
+        return
+
+def update_usage_text(ws):
     values = ws.used_range.value
 
     if not values:
@@ -75,6 +92,70 @@ def update_usage_text(ws):
                 if new_val != val:
                     ws.cells(r+1, c+1).value = new_val
                     return True
+
+def get_allcells_in_target_sheet(ws):
+    if any(k in ws.name for k in target_keywords):
+        ur = ws.used_range
+        return {
+            "values": ur.value,
+            "formats": ur.number_format,
+            "formulas": ur.formula,
+            "base_row": ur.row,
+            "base_col": ur.column
+            }
+
+def is_target_sheet(sheet_name, all_data):
+    if sheet_name in all_data:
+        return True
+    else:
+        return False
+    
+def read_each_data(all_data, sheet_name):
+    data = all_data.get(sheet_name)
+
+    if not data:
+        return None, None, None, None, None
+    
+    values = data.get("values")
+    formats = data.get("formats")
+    formulas = data.get("formulas")
+    base_row = data.get("base_row")
+    base_col = data.get("base_col")
+
+    if not values:
+        return None, None, None, None, None
+    
+    if not isinstance(values, list):
+        values = [[values]]
+    if not isinstance(values[0], list):
+        values = [values]
+    
+    if formats is None:
+        formats = [[""] * len(values[0]) for _ in range(len(values))]
+    else:
+        if not isinstance(formats, list):
+            formats = [[formats]]
+        elif not isinstance(formats[0], list):
+            formats = [formats]
+
+    if formulas is None:
+        formulas = [[None]*len(values[0]) for _ in range(len(values))]
+    else:
+        if not isinstance(formulas, list):
+            formulas = [[formulas]]
+        elif not isinstance(formulas[0], list):
+            formulas = [formulas]
+    
+    return values, formats, formulas, base_row, base_col
+
+def get_allcells_without_fmt(ws):
+    ur = ws.range("A1:N400")
+    return {
+        "values": ur.value,
+        "formulas": ur.formula,
+        "base_row" : ur.row,
+        "base_col" : ur.column
+    }
 
 #================================
 #メイン処理
@@ -101,132 +182,83 @@ try:
         try:
             wb = app.books.open(file_path)
 
-            #================================
-            #データの取得
-            #================================
-
-            all_data = {}
-            
-            for ws in wb.sheets:
-                #if ws.name not in SOURCE_SHEET:
-                    #continue
 
             #================================
             #月の繰り上げ
             #================================
-                if any(k in ws.name for k in target_keywords):
-                    ur = ws.used_range
-                    all_data[ws.name] = {
-                        "values": ur.value,
-                        "formats": ur.number_format,
-                        "formulas": ur.formula,
-                        "base_row": ur.row,
-                        "base_col": ur.column
-                        }
+
+            all_data = {}
+            print("【処理1】")
+            
+            for ws in wb.sheets:
+                all_data[ws.name] = get_allcells_in_target_sheet(ws)
 
             for ws in wb.sheets:
-                if ws.name not in all_data:
-                    continue
 
-                print("対象シート:", ws.name)
+                sheet_name = ws.name
 
-                data = all_data[ws.name]
-                values = data["values"]
-                formats = data["formats"]
-                formulas = data["formulas"]
-                base_row = data["base_row"]
-                base_col = data["base_col"]
+                if is_target_sheet(sheet_name, all_data):
+                    result = read_each_data(all_data, sheet_name)
 
-                if values is None:
-                    continue
-                if formats is None:
-                    formats = [[""] * len(values[0]) for _ in range(len(values))]
-                if formulas is None:
-                    formulas = [[None]*len(values[0]) for _ in range(len(values))]
+                    if not result[0]:
+                        continue
 
-                if not isinstance(values, list):
-                    continue
-                if not isinstance(values[0], list):
-                    values = [values]
+                    values, formats, formulas, base_row, base_col = result
 
-                if not isinstance(formats, list):
-                    formats = [formats]
-                if not isinstance(formats[0], list):
-                    formats = [[f] for f in formats]
+                    if not values:
+                        continue
 
-                if not isinstance(formulas, list):
-                    formulas = [formulas]
-                if not isinstance(formulas[0], list):
-                    formulas = [[f] for f in formulas]
+                    if not isinstance(values, list):
+                        continue
 
-                #max_col = max(len(row) for row in values)
+                    for r, row in enumerate(values):
+                        #for c in range(max_col):
+                        for c, val in enumerate(row):
+                            val = row[c] if c < len(row) else None
 
-                for r, row in enumerate(values):
-                    #for c in range(max_col):
-                    for c, val in enumerate(row):
-                        val = row[c] if c < len(row) else None
-
-                        if val is None:
-                            continue
-
-                        if c not in DATE_COLUMNS:
-                            continue
-
-                        # 安全取得
-                        fmt = ""
-                        formula = None
-
-                        if r < len(formats) and c < len(formats[r]):
-                            fmt = str(formats[r][c]).lower()
-
-                        if r < len(formulas) and c < len(formulas[r]):
-                            formula = formulas[r][c]
-
-                        if formula:
-                            continue
-
-                        if not isinstance(val, (datetime, int, float, str)):
-                            continue
-
-                        is_date_like = False
-
-                        if isinstance(val, datetime):
-                            is_date_like = True
-
-                        elif isinstance(val, (int, float)):
-                            is_date_like = True  # Excelシリアルの可能性
-
-                        elif isinstance(val, str):
-                            try:
-                                datetime.strptime(val, "%Y/%m/%d")
-                                is_date_like = True
-                            except:
-                                pass
-
-                        if not is_date_like:
-                            continue
-
-                        if isinstance(val, datetime):
-                            new_val = add_one_month(val)
-
-                        # elif isinstance(val, (int, float)):
-                        #     if not (40000 < val <50000):
-                        #         continue
-                        #     dt = datetime(1899, 12, 30) + timedelta(days=val)
-                        #     new_val = add_one_month(dt)
-                    
-                        elif isinstance(val, str):
-                            try:
-                                dt = datetime.strptime(val, "%Y/%m/%d")
-                                new_val = add_one_month(dt)
-                            except:
+                            if val is None:
                                 continue
 
-                        else:
-                            continue
+                            if c not in DATE_COLUMNS:
+                                continue
 
-                        ws.cells(base_row+r, base_col+c).value = new_val
-                        print(new_val, "を入力")
+                            # 安全取得
+                            fmt = ""
+                            formula = None
+
+                            if r < len(formats) and c < len(formats[r]):
+                                fmt = str(formats[r][c]).lower()
+
+                            if r < len(formulas) and c < len(formulas[r]):
+                                formula = formulas[r][c]
+
+                            if formula:
+                                continue
+
+                            if not isinstance(val, (datetime, int, float, str)):
+                                continue
+
+                            is_date_like = False
+
+                            if isinstance(val, datetime):
+                                is_date_like = True
+
+                            elif isinstance(val, (int, float)):
+                                is_date_like = True  # Excelシリアルの可能性
+
+                            elif isinstance(val, str):
+                                try:
+                                    datetime.strptime(val, "%Y/%m/%d")
+                                    is_date_like = True
+                                except:
+                                    pass
+
+                            if not is_date_like:
+                                continue
+
+                            if update_month(val) is not None:
+                                ws.cells(base_row+r, base_col+c).value = update_month(val)
+                                print(" ",update_month(val), "を入力")
 
             # #================================
             # #2026年〇月利用分を更新
@@ -249,33 +281,31 @@ try:
             #================================
             #2026年〇月利用分を更新 関数化　動くかな？
             #================================
+            print("【処理2】")
             for ws in wb.sheets:
                 if update_usage_text(ws):
-                    print(ws.name, "を", new_val, "に更新")
+                    print(" ", ws.name, "を更新")
 
             #================================
             #n/24回目の更新
             #================================
-            processed = set()
+            print("【処理3】")
             processed_cells = set()
 
             for ws in wb.sheets:
-                ur = ws.range("A1:N400")
-                all_data[ws.name] = {
-                    "values": ur.value,
-                    "formulas": ur.formula,
-                }
+                all_data[ws.name] = get_allcells_without_fmt(ws)
 
             for ws in wb.sheets:
-                if ws.name in processed:
-                    continue
-
+                
                 data = all_data[ws.name]
                 values = data["values"]
                 formulas = data["formulas"]
+                base_row = data["base_row"]
+                base_col = data["base_col"]
 
                 if not values:
                     continue
+
                 if formulas is None:
                     formulas = [[None]*len(values[0]) for _ in range(len(values))]
 
@@ -294,10 +324,12 @@ try:
                         if c not in DATE_COLUMNS_2:
                             continue
 
-                        formula = formulas[r][c] if r < len(formulas) and c < len(formulas[r]) else None
-                        if isinstance(formula, str) and formula.startswith("="):
-                            print
+                        if formulas and r < len(formulas) and c < len(formulas[r]):
+                            formula = formulas[r][c]
+
+                        if not isinstance(val, (str, datetime)):
                             continue
+
 
                         if isinstance(val, str):  #セルの値value)はstr型(文字列)？
                             match = pattern_b.search(val)   #Matchオブジェクト
@@ -306,20 +338,27 @@ try:
                                 cell_key = (ws.name, r, c)
                                 if cell_key in processed_cells:
                                     continue
+                                
+                                if formula is None:
+                                    #fallback
+                                        cell_formula = ws.cells(base_row + r, base_col + c).formula
 
-                                print("更新対象:", val,"('", ws.name,"'シート", r, "行", c, "列)")
+                                        if isinstance(cell_formula, str) and cell_formula.startswith("="):
+                                            continue
+                                else:
+                                    if isinstance(formula, str) and formula.startswith("="):
+                                        continue
+
+                                print("  更新対象:", val,"('", ws.name,"'シート", r, "行", c, "列)")
                                 #print(formulas[r][c])
-                                if ws.cells(r+1, c+1).formula.startswith("="):
-                                    print("！", ws.cells(r+1, c+1).formula, "は数式のため処理をスキップ！")
-                                    continue
+
                                 left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
                                 right = match.group(2)
                                 text = f"{left}/{right}"
                                 result = re.sub(r"(\d+)/(\d+回目)", text, val)
 
-                                ws.cells(r+1, c+1).value = result   #f文字列
-                                print("更新完了:", result, "に置き換え")
-                                processed.add(ws.name)
+                                ws.cells(r+1, c+1).value = result   #f文字列g
+                                print("  更新完了:", result, "に置き換え")
                                 processed_cells.add(cell_key)
 
             new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
