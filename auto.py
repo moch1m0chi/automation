@@ -78,40 +78,56 @@ def update_month(val):
     else:
         return
 
-def update_usage_text(ws):
-    values = ws.used_range.value
-
-    if not values:
-        return
-
-    for r, row in enumerate(values):
-        for c, val in enumerate(row):
-            if isinstance(val, str):
-                new_val = increment_year_month_text(val)
-            
-                if new_val != val:
-                    ws.cells(r+1, c+1).value = new_val
-                    return True
+def is_target_sheet(ws):
+    return any(k in ws.name for k in target_keywords)
 
 def get_allcells_in_target_sheet(ws):
-    if any(k in ws.name for k in target_keywords):
-        ur = ws.used_range
-        return {
-            "values": ur.value,
-            "formats": ur.number_format,
-            "formulas": ur.formula,
-            "base_row": ur.row,
-            "base_col": ur.column
-            }
-
-def is_target_sheet(sheet_name, all_data):
-    if sheet_name in all_data:
-        return True
-    else:
-        return False
+    if not is_target_sheet(ws):
+        return None
     
-def read_each_data(all_data, sheet_name):
-    data = all_data.get(sheet_name)
+    ur = ws.used_range
+
+    values = ur.value
+    formats = ur.number_format
+    formulas = ur.formula
+
+    if not values:
+        return None
+    
+    if not isinstance(values, list):
+        values = [[values]]
+    elif not isinstance(values[0], list):
+        values = [values]
+
+    rows = len(values)
+    cols = len(values[0])
+
+    if formats is None:
+        formats = [[""] * cols for _ in range(rows)]
+    else:
+        if not isinstance(formats, list):
+            formats = [[formats]]
+        else:
+            formats = [formats]
+    
+    if formulas is None:
+        formulas = [[None] * cols for _ in range(rows)]
+    else:
+        if not isinstance(formulas, list):
+            formulas = [[formulas]]
+        elif not isinstance(formulas[0], list):
+            formulas = [formulas]
+
+    return {
+        "values": values,
+        "formats": formats,
+        "formulas": formulas,
+        "base_row": rows,
+        "base_col": cols
+        }
+
+def read_each_data(data, ws):
+    data = data.get(ws)
 
     if not data:
         return None, None, None, None, None
@@ -148,6 +164,22 @@ def read_each_data(all_data, sheet_name):
     
     return values, formats, formulas, base_row, base_col
 
+def update_usage_text(ws):
+    values = ws.used_range.value
+
+    if not values:
+        return
+
+    for r, row in enumerate(values):
+        for c, val in enumerate(row):
+            if isinstance(val, str):
+                old_val = val
+                new_val = increment_year_month_text(val)
+            
+                if new_val != val:
+                    ws.cells(r+1, c+1).value = new_val
+                    print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+
 def get_allcells_without_fmt(ws):
     ur = ws.range("A1:N400")
     return {
@@ -182,23 +214,18 @@ try:
         try:
             wb = app.books.open(file_path)
 
-
             #================================
             #月の繰り上げ
             #================================
 
-            all_data = {}
+            data = {}
             print("【処理1】")
             
             for ws in wb.sheets:
-                all_data[ws.name] = get_allcells_in_target_sheet(ws)
+                data = get_allcells_in_target_sheet(ws)
 
-            for ws in wb.sheets:
-
-                sheet_name = ws.name
-
-                if is_target_sheet(sheet_name, all_data):
-                    result = read_each_data(all_data, sheet_name)
+                if is_target_sheet(ws):
+                    result = read_each_data(data, ws)
 
                     if not result[0]:
                         continue
@@ -256,6 +283,11 @@ try:
                             if not is_date_like:
                                 continue
 
+                            cell_formula = ws.cells(base_row + r, base_col + c).formula
+                            if isinstance(cell_formula, str) and cell_formula.startswith("="):
+                                print("関数発見")
+                                continue
+
                             if update_month(val) is not None:
                                 ws.cells(base_row+r, base_col+c).value = update_month(val)
                                 print(" ",update_month(val), "を入力")
@@ -293,11 +325,10 @@ try:
             processed_cells = set()
 
             for ws in wb.sheets:
-                all_data[ws.name] = get_allcells_without_fmt(ws)
+                data = get_allcells_without_fmt(ws)
 
             for ws in wb.sheets:
                 
-                data = all_data[ws.name]
                 values = data["values"]
                 formulas = data["formulas"]
                 base_row = data["base_row"]
@@ -329,7 +360,7 @@ try:
 
                         if not isinstance(val, (str, datetime)):
                             continue
-
+                        
 
                         if isinstance(val, str):  #セルの値value)はstr型(文字列)？
                             match = pattern_b.search(val)   #Matchオブジェクト
@@ -349,8 +380,7 @@ try:
                                     if isinstance(formula, str) and formula.startswith("="):
                                         continue
 
-                                print("  更新対象:", val,"('", ws.name,"'シート", r, "行", c, "列)")
-                                #print(formulas[r][c])
+                                old_val = val
 
                                 left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
                                 right = match.group(2)
@@ -358,7 +388,7 @@ try:
                                 result = re.sub(r"(\d+)/(\d+回目)", text, val)
 
                                 ws.cells(r+1, c+1).value = result   #f文字列g
-                                print("  更新完了:", result, "に置き換え")
+                                print("  更新完了:", old_val,"→", result, "に更新")
                                 processed_cells.add(cell_key)
 
             new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
