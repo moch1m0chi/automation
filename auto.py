@@ -111,15 +111,15 @@ def get_allcells_in_target_sheet(ws):
         "base_col": ur.column
         }
 
-def read_each_data(data):
-    if not data:
+def read_each_data(sheetdata):
+    if not sheetdata:
         return None, None, None, None, None
     
-    values = data.get("values")
-    formats = data.get("formats")
-    formulas = data.get("formulas")
-    base_row = data.get("base_row")
-    base_col = data.get("base_col")
+    values = sheetdata.get("values")
+    formats = sheetdata.get("formats")
+    formulas = sheetdata.get("formulas")
+    base_row = sheetdata.get("base_row")
+    base_col = sheetdata.get("base_col")
 
     if not values:
         return None, None, None, None, None
@@ -146,6 +146,18 @@ def read_each_data(data):
             formulas = [formulas]
     
     return values, formats, formulas, base_row, base_col
+
+def normalized_fmt(formats, r, c):
+    fmt = ""
+    if r < len(formats) and c < len(formats[r]):
+        fmt = str(formats[r][c]).lower()
+    return fmt
+
+def normalized_formula(formulas, r, c):
+    formula = None
+    if r < len(formulas) and c < len(formulas[r]):
+        formula = formulas[r][c]
+    return formula
 
 def is_target_column(c):
     if c in DATE_COLUMNS:
@@ -176,6 +188,33 @@ def write_update_month_to_sheet(ws, base_row, r, base_col, c, val):
     if update_month(val) is not None:
         ws.cells(base_row + r, base_col + c).value = update_month(val)
         print(" ",update_month(val), "を入力")
+
+def process_month_update(ws, r, c, val, data):
+    values, formats, formulas, base_row, base_col = data
+    val = row[c] if c < len(row) else None
+
+    if val is None:
+        return
+
+    if not is_target_column(c):
+        return
+
+    if normalized_fmt(formats, r, c):
+        return
+
+    if normalized_formula(formulas, r, c):
+        return
+
+    if not isinstance(val, (datetime, int, float, str)):
+        return
+
+    if not is_date_like(val):
+        return
+
+    if is_formula_cell(ws, base_row, r, base_col, c):
+        return
+
+    write_update_month_to_sheet(ws, base_row, r, base_col, c, val)
 
 def increment_year_month_text(text):
     def repl(match):
@@ -275,6 +314,13 @@ def is_black_tab(ws):
     except:
         return False
 
+def save_excel(file_name, output_folder, wb):
+    new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
+    output_path = os.path.join(output_folder, new_file_name)
+
+    wb.save(output_path)
+    print(f"保存完了:{new_file_name}")
+
 #================================
 #メイン処理
 #================================
@@ -303,69 +349,38 @@ try:
 
         try:
             wb = app.books.open(file_path)
+            data = {}
 
             #================================
             #月の繰り上げ
             #================================
 
-            data = {}
             print("【処理1】")
             
             for ws in wb.sheets:
-                data = get_allcells_in_target_sheet(ws)
+                sheetdata = get_allcells_in_target_sheet(ws)
 
                 if is_target_sheet(ws):
-                    result = read_each_data(data)
+                    data = read_each_data(sheetdata)
 
-                    if not result[0]:
+                    if not sheetdata:
                         continue
 
-                    values, formats, formulas, base_row, base_col = result
-
-                    if not values:
+                    if not sheetdata["values"]:
                         continue
 
-                    if not isinstance(values, list):
+                    if not isinstance(sheetdata["values"], list):
                         continue
 
-                    for r, row in enumerate(values):
+                    for r, row in enumerate(sheetdata["values"]):
                         for c, val in enumerate(row):
-                            val = row[c] if c < len(row) else None
-
-                            if val is None:
-                                continue
-
-                            if not is_target_column(c):
-                                continue
-
-                            # 安全取得
-                            fmt = ""
-                            formula = None
-
-                            if r < len(formats) and c < len(formats[r]):
-                                fmt = str(formats[r][c]).lower()
-
-                            if r < len(formulas) and c < len(formulas[r]):
-                                formula = formulas[r][c]
-
-                            if formula:
-                                continue
-
-                            if not isinstance(val, (datetime, int, float, str)):
-                                continue
-
-                            if not is_date_like(val):
-                                continue
-
-                            if is_formula_cell(ws, base_row, r, base_col, c):
-                                continue
-
-                            write_update_month_to_sheet(ws, base_row, r, base_col, c, val)
+                            process_month_update(ws, r, c, val, data)
 
             #================================
             #2026年〇月利用分を更新
             #================================
             print("【処理2】")
+
             for ws in wb.sheets:
                 update_usage_text(ws)
 
@@ -373,6 +388,7 @@ try:
             #n/24回目の更新
             #================================
             print("【処理3】")
+
             processed_cells = set()
 
             for ws in wb.sheets:
@@ -456,11 +472,10 @@ try:
                     print(ws.name, "は完了状態 → タブ色を変更")
                     continue
 
-            new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
-            output_path = os.path.join(output_folder, new_file_name)
-
-            wb.save(output_path)
-            print(f"保存完了:{new_file_name}")
+            #================================
+            #Excelファイルの保存
+            #================================
+            save_excel(file_name, output_folder, wb)
 
         except Exception as e: 
             print(f"エラー発生:{file_name}")
