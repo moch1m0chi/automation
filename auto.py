@@ -122,13 +122,11 @@ def get_allcells_in_target_sheet(ws):
         "values": values,
         "formats": formats,
         "formulas": formulas,
-        "base_row": rows,
-        "base_col": cols
+        "base_row": ur.row,
+        "base_col": ur.column
         }
 
-def read_each_data(data, ws):
-    data = data.get(ws)
-
+def read_each_data(data):
     if not data:
         return None, None, None, None, None
     
@@ -225,7 +223,7 @@ try:
                 data = get_allcells_in_target_sheet(ws)
 
                 if is_target_sheet(ws):
-                    result = read_each_data(data, ws)
+                    result = read_each_data(data)
 
                     if not result[0]:
                         continue
@@ -239,7 +237,6 @@ try:
                         continue
 
                     for r, row in enumerate(values):
-                        #for c in range(max_col):
                         for c, val in enumerate(row):
                             val = row[c] if c < len(row) else None
 
@@ -285,7 +282,6 @@ try:
 
                             cell_formula = ws.cells(base_row + r, base_col + c).formula
                             if isinstance(cell_formula, str) and cell_formula.startswith("="):
-                                print("関数発見")
                                 continue
 
                             if update_month(val) is not None:
@@ -315,8 +311,7 @@ try:
             #================================
             print("【処理2】")
             for ws in wb.sheets:
-                if update_usage_text(ws):
-                    print(" ", ws.name, "を更新")
+                update_usage_text(ws)
 
             #================================
             #n/24回目の更新
@@ -326,8 +321,6 @@ try:
 
             for ws in wb.sheets:
                 data = get_allcells_without_fmt(ws)
-
-            for ws in wb.sheets:
                 
                 values = data["values"]
                 formulas = data["formulas"]
@@ -354,6 +347,8 @@ try:
                     for c, val in enumerate(row):    #抜き出した行のセルを走査
                         if c not in DATE_COLUMNS_2:
                             continue
+
+                        formula = None
 
                         if formulas and r < len(formulas) and c < len(formulas[r]):
                             formula = formulas[r][c]
@@ -387,8 +382,8 @@ try:
                                 text = f"{left}/{right}"
                                 result = re.sub(r"(\d+)/(\d+回目)", text, val)
 
-                                ws.cells(r+1, c+1).value = result   #f文字列g
-                                print("  更新完了:", old_val,"→", result, "に更新")
+                                ws.cells(base_row + r, base_col + c).value = result   #f文字列g
+                                print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
                                 processed_cells.add(cell_key)
 
             new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
