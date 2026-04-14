@@ -18,7 +18,6 @@ pattern_b = re.compile(r"(\d+)/(\d+回目)")
 #関数
 #================================
 
-#ファイル名の月繰り上げ
 def increment_month_in_filename(file_name):
     match = re.search(r"(\d+)月", file_name)
     
@@ -34,20 +33,6 @@ def increment_month_in_filename(file_name):
         return new_name
     else:
         return file_name  # 月が見つからなければそのまま
-    
-def increment_year_month_text(text):
-    def repl(match):
-        year = int(match.group(1))
-        month = int(match.group(2))
-
-        month += 1
-        if month > 12:
-            month = 1
-            year += 1
-
-        return f"{year}年{month}月利用分"
-
-    return pattern_a.sub(repl, text)
 
 def add_one_month(dt):
     year = dt.year
@@ -162,6 +147,50 @@ def read_each_data(data):
     
     return values, formats, formulas, base_row, base_col
 
+def is_target_column(c):
+    if c in DATE_COLUMNS:
+        return True
+    
+def is_date_like(val):
+
+    if isinstance(val, datetime):
+        return True
+
+    elif isinstance(val, (int, float)):
+        return True  # Excelシリアルの可能性
+
+    elif isinstance(val, str):
+        try:
+            datetime.strptime(val, "%Y/%m/%d")
+            return True
+        except:
+            pass
+    
+    return False
+
+def is_formula_cell(ws, base_row, r, base_col, c):
+    cell_formula = ws.cells(base_row + r, base_col + c).formula
+    return isinstance(cell_formula, str) and cell_formula.startswith("=")
+
+def write_update_month_to_sheet(ws, base_row, r, base_col, c, val):
+    if update_month(val) is not None:
+        ws.cells(base_row + r, base_col + c).value = update_month(val)
+        print(" ",update_month(val), "を入力")
+
+def increment_year_month_text(text):
+    def repl(match):
+        year = int(match.group(1))
+        month = int(match.group(2))
+
+        month += 1
+        if month > 12:
+            month = 1
+            year += 1
+
+        return f"{year}年{month}月利用分"
+
+    return pattern_a.sub(repl, text)
+
 def update_usage_text(ws):
     values = ws.used_range.value
 
@@ -180,12 +209,71 @@ def update_usage_text(ws):
 
 def get_allcells_without_fmt(ws):
     ur = ws.range("A1:N400")
+    values = ur.value
+    formulas = ur.formula
+
+    if not values:
+        return None
+    
+    if not isinstance(values, list):
+        values = [[values]]
+    elif not isinstance(values[0], list):
+        values = [values]
+
+    rows = len(values)
+    cols = len(values[0])
+    
+    if formulas is None:
+        formulas = [[None] * cols for _ in range(rows)]
+    else:
+        if not isinstance(formulas, list):
+            formulas = [[formulas]]
+        elif not isinstance(formulas[0], list):
+            formulas = [formulas]
+
     return {
-        "values": ur.value,
-        "formulas": ur.formula,
+        "values": values,
+        "formulas": formulas,
         "base_row" : ur.row,
         "base_col" : ur.column
     }
+
+def read_each_data_without_fmt(data):
+    if not data:
+        return None, None, None, None
+    
+    values = data.get("values")
+    formulas = data.get("formulas")
+    base_row = data.get("base_row")
+    base_col = data.get("base_col")
+
+    if not values:
+        return None, None, None, None
+    
+    if not isinstance(values, list):
+        values = [[values]]
+    if not isinstance(values[0], list):
+        values = [values]
+
+    if formulas is None:
+        formulas = [[None]*len(values[0]) for _ in range(len(values))]
+    else:
+        if not isinstance(formulas, list):
+            formulas = [[formulas]]
+        elif not isinstance(formulas[0], list):
+            formulas = [formulas]
+    
+    return values, formulas, base_row, base_col
+
+def is_project_sheet(ws):
+    return "案件" in ws.name
+
+def is_black_tab(ws):
+    try:
+        color = ws.api.Tab.Color
+        return color == 0 and ws.api.Tab.ColorIndex != -4142
+    except:
+        return False
 
 #================================
 #メイン処理
@@ -194,7 +282,7 @@ app = xw.App(visible=False)
 app.screen_updating = False
 app.display_alerts = False
 
-target_keywords = ["確定合意書", "DMM（秀", "御請求書"]
+target_keywords = ["確定合意書", "DMM（秀", "御請求書",]
 #SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
 DATE_COLUMNS = [1,7]
 DATE_COLUMNS_2 = [4, 10]
@@ -208,6 +296,10 @@ try:
         print(f"\n処理開始: {file_name}")
 
         wb = None
+
+        #================================
+        #メイン処理
+        #================================
 
         try:
             wb = app.books.open(file_path)
@@ -243,7 +335,7 @@ try:
                             if val is None:
                                 continue
 
-                            if c not in DATE_COLUMNS:
+                            if not is_target_column(c):
                                 continue
 
                             # 安全取得
@@ -262,52 +354,16 @@ try:
                             if not isinstance(val, (datetime, int, float, str)):
                                 continue
 
-                            is_date_like = False
-
-                            if isinstance(val, datetime):
-                                is_date_like = True
-
-                            elif isinstance(val, (int, float)):
-                                is_date_like = True  # Excelシリアルの可能性
-
-                            elif isinstance(val, str):
-                                try:
-                                    datetime.strptime(val, "%Y/%m/%d")
-                                    is_date_like = True
-                                except:
-                                    pass
-
-                            if not is_date_like:
+                            if not is_date_like(val):
                                 continue
 
-                            cell_formula = ws.cells(base_row + r, base_col + c).formula
-                            if isinstance(cell_formula, str) and cell_formula.startswith("="):
+                            if is_formula_cell(ws, base_row, r, base_col, c):
                                 continue
 
-                            if update_month(val) is not None:
-                                ws.cells(base_row+r, base_col+c).value = update_month(val)
-                                print(" ",update_month(val), "を入力")
-
-            # #================================
-            # #2026年〇月利用分を更新
-            # #================================
-            # for ws in wb.sheets:
-            #     values = ws.used_range.value
-
-            #     if not values:
-            #         continue
-
-            #     for r, row in enumerate(values):
-            #         for c, val in enumerate(row):
-            #             if isinstance(val, str):
-            #                 new_val = increment_year_month_text(val)
-
-            #                 if new_val != val:
-            #                     ws.cells(r+1, c+1).value = new_val
-            #                     print(val, "→", new_val)
+                            write_update_month_to_sheet(ws, base_row, r, base_col, c, val)
 
             #================================
-            #2026年〇月利用分を更新 関数化　動くかな？
+            #2026年〇月利用分を更新
             #================================
             print("【処理2】")
             for ws in wb.sheets:
@@ -321,11 +377,15 @@ try:
 
             for ws in wb.sheets:
                 data = get_allcells_without_fmt(ws)
+
+                is_completed_sheet = False
                 
-                values = data["values"]
-                formulas = data["formulas"]
-                base_row = data["base_row"]
-                base_col = data["base_col"]
+                result = read_each_data_without_fmt(data)
+
+                if not result[0]:
+                    continue
+
+                values, formulas, base_row, base_col = result
 
                 if not values:
                     continue
@@ -377,14 +437,24 @@ try:
 
                                 old_val = val
 
-                                left = int(match.group(1)) + 1  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
+                                left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
                                 right = match.group(2)
-                                text = f"{left}/{right}"
-                                result = re.sub(r"(\d+)/(\d+回目)", text, val)
+                                right_num = int(right.replace("回目", ""))
 
-                                ws.cells(base_row + r, base_col + c).value = result   #f文字列g
-                                print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
-                                processed_cells.add(cell_key)
+                                if left == right_num:
+                                    is_completed_sheet = True
+                                else:
+                                    new_left = left + 1
+                                    text = f"{new_left}/{right}"
+                                    result = re.sub(r"(\d+)/(\d+回目)", text, val)
+                                    ws.cells(base_row + r, base_col + c).value = result   #f文字列g
+                                    print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+                                    processed_cells.add(cell_key)
+
+                if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
+                    ws.api.Tab.Color = 0
+                    print(ws.name, "は完了状態 → タブ色を変更")
+                    continue
 
             new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
             output_path = os.path.join(output_folder, new_file_name)
