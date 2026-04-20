@@ -323,7 +323,7 @@ def is_like_formula(formula, ws, base_row, r, base_col, c):
     else:
         return isinstance(formula, str) and formula.startswith("=")
 
-def wright_update_times_per_24(val, match, ws, base_row, base_col, r, c):
+def wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c):
     old_val = val
     left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
     right = match.group(2)
@@ -332,6 +332,10 @@ def wright_update_times_per_24(val, match, ws, base_row, base_col, r, c):
     result = re.sub(r"(\d+)/(\d+回目)", text, val)
     ws.cells(base_row + r, base_col + c).value = result   #f文字列g
     print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+
+def change_tab_color(ws):
+    ws.api.Tab.Color = 0
+    print(ws.name, "は完了状態 → タブ色を変更")
 
 def save_excel(file_name, output_folder, wb):
     new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
@@ -517,7 +521,7 @@ app.display_alerts = False
 
 target_keywords = ["確定合意書", "DMM（秀", "御請求書","支払"]
 #SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
-DATE_COLUMNS = [1,7,9]
+DATE_COLUMNS = [1, 7, 9]
 DATE_COLUMNS_2 = [4, 10]
 
 try:
@@ -645,11 +649,10 @@ try:
                                 if left == right_num:
                                     is_completed_sheet = True
                                 else:
-                                    wright_update_times_per_24(val, match, ws, base_row, base_col, r, c)
+                                    wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c)
 
                 if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
-                    ws.api.Tab.Color = 0
-                    print(ws.name, "は完了状態 → タブ色を変更")
+                    change_tab_color(ws)
                     continue
 
             #================================
