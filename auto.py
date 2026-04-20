@@ -314,12 +314,199 @@ def is_black_tab(ws):
     except:
         return False
 
+def is_like_formula(formula, ws, base_row, r, base_col, c):
+    if formula is None:
+        #fallback 
+        cell_formula = ws.cells(base_row + r, base_col + c).formula
+        return isinstance(cell_formula, str) and cell_formula.startswith("=")
+    
+    else:
+        return isinstance(formula, str) and formula.startswith("=")
+
+def wright_update_times_per_24(val, match, ws, base_row, base_col, r, c):
+    old_val = val
+    left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
+    right = match.group(2)
+    new_left = left + 1
+    text = f"{new_left}/{right}"
+    result = re.sub(r"(\d+)/(\d+回目)", text, val)
+    ws.cells(base_row + r, base_col + c).value = result   #f文字列g
+    print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+
 def save_excel(file_name, output_folder, wb):
     new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
     output_path = os.path.join(output_folder, new_file_name)
 
     wb.save(output_path)
     print(f"保存完了:{new_file_name}")
+
+def run_job(input_folder, output_folder, log_func=None):
+#     app = xw.App(visible=False)
+#     app.screen_updating = False
+#     app.display_alerts = False
+
+#     try:
+#         for file_name in os.listdir(input_folder):
+#             if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
+#                 continue
+                
+#             file_path = os.path.join(input_folder, file_name)
+
+#             if log_func:
+#                     log_func(f"処理開始: {file_name}")
+
+
+#             wb = None
+
+#             #================================
+#             #メイン処理
+#             #================================
+
+#             try:
+#                 wb = app.books.open(file_path)
+#                 data = {}
+
+#                 #================================
+#                 #月の繰り上げ
+#                 #================================
+
+#                 print("【処理1】")
+                
+#                 for ws in wb.sheets:
+#                     sheetdata = get_allcells_in_target_sheet(ws)
+
+#                     if is_target_sheet(ws):
+#                         data = read_each_data(sheetdata)
+
+#                         if not sheetdata:
+#                             continue
+
+#                         if not sheetdata["values"]:
+#                             continue
+
+#                         if not isinstance(sheetdata["values"], list):
+#                             continue
+
+#                         for r, row in enumerate(sheetdata["values"]):
+#                             for c, val in enumerate(row):
+#                                 process_month_update(ws, r, c, val, data)
+
+#                 #================================
+#                 #2026年〇月利用分を更新
+#                 #================================
+#                 print("【処理2】")
+
+#                 for ws in wb.sheets:
+#                     update_usage_text(ws)
+
+#                 #================================
+#                 #n/24回目の更新
+#                 #================================
+#                 print("【処理3】")
+
+#                 processed_cells = set()
+
+#                 for ws in wb.sheets:
+#                     data = get_allcells_without_fmt(ws)
+
+#                     is_completed_sheet = False
+                    
+#                     result = read_each_data_without_fmt(data)
+
+#                     if not result[0]:
+#                         continue
+
+#                     values, formulas, base_row, base_col = result
+
+#                     if not values:
+#                         continue
+
+#                     if formulas is None:
+#                         formulas = [[None]*len(values[0]) for _ in range(len(values))]
+
+#                     if not isinstance(values, list):
+#                         continue
+#                     if not isinstance(values[0], list):
+#                         values = [values]
+
+#                     if not isinstance(formulas, list):
+#                         formulas = [formulas]
+#                     if not isinstance(formulas[0], list):
+#                         formulas = [[f] for f in formulas]
+
+#                     for r, row in enumerate(values):  #行を抜き出し
+#                         for c, val in enumerate(row):    #抜き出した行のセルを走査
+#                             if c not in DATE_COLUMNS_2:
+#                                 continue
+
+#                             formula = None
+
+#                             if formulas and r < len(formulas) and c < len(formulas[r]):
+#                                 formula = formulas[r][c]
+
+#                             if not isinstance(val, (str, datetime)):
+#                                 continue
+                            
+
+#                             if isinstance(val, str):  #セルの値value)はstr型(文字列)？
+#                                 match = pattern_b.search(val)   #Matchオブジェクト
+
+#                                 if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
+#                                     cell_key = (ws.name, r, c)
+#                                     if cell_key in processed_cells:
+#                                         continue
+                                    
+#                                     if formula is None:
+#                                         #fallback
+#                                             cell_formula = ws.cells(base_row + r, base_col + c).formula
+
+#                                             if isinstance(cell_formula, str) and cell_formula.startswith("="):
+#                                                 continue
+#                                     else:
+#                                         if isinstance(formula, str) and formula.startswith("="):
+#                                             continue
+
+#                                     old_val = val
+
+#                                     left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
+#                                     right = match.group(2)
+#                                     right_num = int(right.replace("回目", ""))
+
+#                                     if left == right_num:
+#                                         is_completed_sheet = True
+#                                     else:
+#                                         new_left = left + 1
+#                                         text = f"{new_left}/{right}"
+#                                         result = re.sub(r"(\d+)/(\d+回目)", text, val)
+#                                         ws.cells(base_row + r, base_col + c).value = result   #f文字列g
+#                                         print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+#                                         processed_cells.add(cell_key)
+
+#                     if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
+#                         ws.api.Tab.Color = 0
+#                         print(ws.name, "は完了状態 → タブ色を変更")
+#                         continue
+
+#                 #================================
+#                 #Excelファイルの保存
+#                 #================================
+#                 save_excel(file_name, output_folder, wb)
+
+#             except Exception as e: 
+#                 if log_func:
+#                     log_func(f"エラー: {file_name} / {e})
+#             finally: 
+#                 try:
+#                     if wb: 
+#                         wb.close()
+#                 except:
+#                     print("えらー")
+#                     pass
+#     finally:
+#         app.quit()
+
+#     ("\n全処理完了！")
+    pass
 
 #================================
 #メイン処理
@@ -328,9 +515,9 @@ app = xw.App(visible=False)
 app.screen_updating = False
 app.display_alerts = False
 
-target_keywords = ["確定合意書", "DMM（秀", "御請求書",]
+target_keywords = ["確定合意書", "DMM（秀", "御請求書","支払"]
 #SOURCE_SHEET = ["DMM（秀商）", "報酬額確定合意書"]
-DATE_COLUMNS = [1,7]
+DATE_COLUMNS = [1,7,9]
 DATE_COLUMNS_2 = [4, 10]
 
 try:
@@ -339,8 +526,8 @@ try:
             continue
             
         file_path = os.path.join(input_folder, file_name)
-        print(f"\n処理開始: {file_name}")
 
+        print(f"\n処理開始: {file_name}")
         wb = None
 
         #================================
@@ -432,7 +619,6 @@ try:
                         if not isinstance(val, (str, datetime)):
                             continue
                         
-
                         if isinstance(val, str):  #セルの値value)はstr型(文字列)？
                             match = pattern_b.search(val)   #Matchオブジェクト
 
@@ -441,17 +627,16 @@ try:
                                 if cell_key in processed_cells:
                                     continue
                                 
-                                if formula is None:
-                                    #fallback
-                                        cell_formula = ws.cells(base_row + r, base_col + c).formula
-
-                                        if isinstance(cell_formula, str) and cell_formula.startswith("="):
-                                            continue
-                                else:
-                                    if isinstance(formula, str) and formula.startswith("="):
-                                        continue
-
-                                old_val = val
+                                if is_like_formula(formula, ws, base_row, r, base_col, c):
+                                    continue
+   
+                                # if formula is None:
+                                #     #fallback 
+                                #     if is_formula_cell(ws, base_row, r, base_col, c):
+                                #         continue
+                                # else:
+                                #     if isinstance(formula, str) and formula.startswith("="):
+                                #         continue
 
                                 left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
                                 right = match.group(2)
@@ -460,12 +645,7 @@ try:
                                 if left == right_num:
                                     is_completed_sheet = True
                                 else:
-                                    new_left = left + 1
-                                    text = f"{new_left}/{right}"
-                                    result = re.sub(r"(\d+)/(\d+回目)", text, val)
-                                    ws.cells(base_row + r, base_col + c).value = result   #f文字列g
-                                    print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
-                                    processed_cells.add(cell_key)
+                                    wright_update_times_per_24(val, match, ws, base_row, base_col, r, c)
 
                 if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
                     ws.api.Tab.Color = 0
@@ -479,8 +659,7 @@ try:
 
         except Exception as e: 
             print(f"エラー発生:{file_name}")
-            print(f"内容:{e}") 
-
+            print(f"内容:{e}")
         finally: 
             try:
                 if wb: 
