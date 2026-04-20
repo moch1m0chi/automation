@@ -323,15 +323,62 @@ def is_like_formula(formula, ws, base_row, r, base_col, c):
     else:
         return isinstance(formula, str) and formula.startswith("=")
 
-def wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c):
-    old_val = val
+def get_counts_in_cell(match):
     left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
     right = match.group(2)
+    return left, right
+
+def is_already_finished(match):
+    left, right = get_counts_in_cell(match)
+    right_num = int(right.replace("回目", ""))
+    if left == right_num:
+        return True
+
+def wright_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c):
+    old_val = val
+    left, right = get_counts_in_cell(match)
     new_left = left + 1
     text = f"{new_left}/{right}"
     result = re.sub(r"(\d+)/(\d+回目)", text, val)
     ws.cells(base_row + r, base_col + c).value = result   #f文字列g
     print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+
+def update_counts(ws, sheetdata, data):
+
+    is_completed_sheet = False
+
+    for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
+        for c, val in enumerate(row):    #抜き出した行のセルを走査
+            values, formulas, base_row, base_col = data
+
+            if c not in DATE_COLUMNS_2:
+                return
+
+            formula = normalized_formula(formulas, r, c)
+
+            if not isinstance(val, (str, datetime)):
+                return
+            
+            if isinstance(val, str):  #セルの値value)はstr型(文字列)？
+                print("そもそもここにいるのか？")
+                match = pattern_b.search(val)   #Matchオブジェクト
+
+                if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
+                    cell_key = (ws.name, r, c)
+                    if cell_key in processed_cells:
+                        return
+                    
+                    if is_like_formula(formula, ws, base_row, r, base_col, c):
+                        return
+
+                    if is_already_finished(match):
+                        is_completed_sheet = True
+                    else:
+                        wright_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
+                else:
+                    return
+                    
+    return is_completed_sheet
 
 def change_tab_color(ws):
     ws.api.Tab.Color = 0
@@ -583,73 +630,46 @@ try:
             processed_cells = set()
 
             for ws in wb.sheets:
-                data = get_allcells_without_fmt(ws)
+                sheetdata = get_allcells_without_fmt(ws)
 
-                is_completed_sheet = False
+                # is_completed_sheet = False
                 
-                result = read_each_data_without_fmt(data)
+                data = read_each_data_without_fmt(sheetdata)
 
-                if not result[0]:
+                if not data[0]:
                     continue
 
-                values, formulas, base_row, base_col = result
+                # for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
+                #     for c, val in enumerate(row):    #抜き出した行のセルを走査
+                is_completed_sheet = update_counts(ws,sheetdata, data)
+                        # values, formulas, base_row, base_col = data
 
-                if not values:
-                    continue
+                        # if c not in DATE_COLUMNS_2:
+                        #     continue
 
-                if formulas is None:
-                    formulas = [[None]*len(values[0]) for _ in range(len(values))]
+                        # formula = normalized_formula(formulas, r, c)
 
-                if not isinstance(values, list):
-                    continue
-                if not isinstance(values[0], list):
-                    values = [values]
-
-                if not isinstance(formulas, list):
-                    formulas = [formulas]
-                if not isinstance(formulas[0], list):
-                    formulas = [[f] for f in formulas]
-
-                for r, row in enumerate(values):  #行を抜き出し
-                    for c, val in enumerate(row):    #抜き出した行のセルを走査
-                        if c not in DATE_COLUMNS_2:
-                            continue
-
-                        formula = None
-
-                        if formulas and r < len(formulas) and c < len(formulas[r]):
-                            formula = formulas[r][c]
-
-                        if not isinstance(val, (str, datetime)):
-                            continue
+                        # if not isinstance(val, (str, datetime)):
+                        #     continue
                         
-                        if isinstance(val, str):  #セルの値value)はstr型(文字列)？
-                            match = pattern_b.search(val)   #Matchオブジェクト
+                        # if isinstance(val, str):  #セルの値value)はstr型(文字列)？
+                        #     match = pattern_b.search(val)   #Matchオブジェクト
 
-                            if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
-                                cell_key = (ws.name, r, c)
-                                if cell_key in processed_cells:
-                                    continue
+                        #     if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
+                        #         cell_key = (ws.name, r, c)
+                        #         if cell_key in processed_cells:
+                        #             continue
                                 
-                                if is_like_formula(formula, ws, base_row, r, base_col, c):
-                                    continue
-   
-                                # if formula is None:
-                                #     #fallback 
-                                #     if is_formula_cell(ws, base_row, r, base_col, c):
-                                #         continue
-                                # else:
-                                #     if isinstance(formula, str) and formula.startswith("="):
-                                #         continue
+                        #         if is_like_formula(formula, ws, base_row, r, base_col, c):
+                        #             continue
 
-                                left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
-                                right = match.group(2)
-                                right_num = int(right.replace("回目", ""))
+                        #         left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
+                        #         right = match.group(2)
 
-                                if left == right_num:
-                                    is_completed_sheet = True
-                                else:
-                                    wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c)
+                        #         if is_already_finished(match):
+                        #             is_completed_sheet = True
+                        #         else:
+                        #             wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c)
 
                 if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
                     change_tab_color(ws)
