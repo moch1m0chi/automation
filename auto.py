@@ -14,9 +14,19 @@ os.makedirs(output_folder, exist_ok=True)
 pattern_a = re.compile(r"(\d{4})年(\d{1,2})月利用分")
 pattern_b = re.compile(r"(\d+)/(\d+回目)")
 
+# class ExcelProcessor:
+#         def __init__(self, wb):
+#         self.wb = wb
+#         self.processed_cells = set()
+
+#         self.target_keywords = ["確定合意書", "DMM（秀", "御請求書","支払"]
+#         self.DATE_COLUMNS = [1, 7, 9]
+#         self.DATE_COLUMNS_2 = [4, 10]
 #================================
 #関数
 #================================
+
+#処理1
 
 def increment_month_in_filename(file_name):
     match = re.search(r"(\d+)月", file_name)
@@ -191,7 +201,7 @@ def write_update_month_to_sheet(ws, base_row, r, base_col, c, val):
 
 def process_month_update(ws, r, c, val, data):
     values, formats, formulas, base_row, base_col = data
-    val = row[c] if c < len(row) else None
+    # val = row[c] if c < len(row) else None
 
     if val is None:
         return
@@ -215,6 +225,27 @@ def process_month_update(ws, r, c, val, data):
         return
 
     write_update_month_to_sheet(ws, base_row, r, base_col, c, val)
+
+def update_month_on_sheets(ws):
+    sheetdata = get_allcells_in_target_sheet(ws)
+
+    if is_target_sheet(ws):
+        data = read_each_data(sheetdata)
+
+        if not sheetdata:
+            return
+
+        if not sheetdata["values"]:
+            return
+
+        if not isinstance(sheetdata["values"], list):
+            return
+
+        for r, row in enumerate(sheetdata["values"]):
+            for c, val in enumerate(row):
+                process_month_update(ws, r, c, val, data)
+
+#処理2
 
 def increment_year_month_text(text):
     def repl(match):
@@ -245,6 +276,8 @@ def update_usage_text(ws):
                 if new_val != val:
                     ws.cells(r+1, c+1).value = new_val
                     print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+
+#処理3
 
 def get_allcells_without_fmt(ws):
     ur = ws.range("A1:N400")
@@ -323,66 +356,72 @@ def is_like_formula(formula, ws, base_row, r, base_col, c):
     else:
         return isinstance(formula, str) and formula.startswith("=")
 
-def get_counts_in_cell(match):
+def get_count_in_cell(match):
     left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
     right = match.group(2)
     return left, right
 
 def is_already_finished(match):
-    left, right = get_counts_in_cell(match)
+    left, right = get_count_in_cell(match)
     right_num = int(right.replace("回目", ""))
     if left == right_num:
         return True
 
 def wright_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c):
     old_val = val
-    left, right = get_counts_in_cell(match)
+    left, right = get_count_in_cell(match)
     new_left = left + 1
     text = f"{new_left}/{right}"
     result = re.sub(r"(\d+)/(\d+回目)", text, val)
     ws.cells(base_row + r, base_col + c).value = result   #f文字列g
     print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
 
-def update_counts(ws, sheetdata, data):
+def change_tab_color(ws):
+    ws.api.Tab.Color = 0
+    print(ws.name, "は完了状態 → タブ色を変更")
+
+def update_counts_on_sheets(ws, processed_cells):
+    sheetdata = get_allcells_without_fmt(ws)
 
     is_completed_sheet = False
+    
+    data = read_each_data_without_fmt(sheetdata)
+
+    if not data[0]:
+        return False
 
     for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
         for c, val in enumerate(row):    #抜き出した行のセルを走査
+    
             values, formulas, base_row, base_col = data
 
             if c not in DATE_COLUMNS_2:
-                return
+                continue
 
             formula = normalized_formula(formulas, r, c)
 
             if not isinstance(val, (str, datetime)):
-                return
+                continue
             
             if isinstance(val, str):  #セルの値value)はstr型(文字列)？
-                print("そもそもここにいるのか？")
                 match = pattern_b.search(val)   #Matchオブジェクト
 
                 if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
                     cell_key = (ws.name, r, c)
                     if cell_key in processed_cells:
-                        return
+                        continue
                     
                     if is_like_formula(formula, ws, base_row, r, base_col, c):
-                        return
+                        continue
 
                     if is_already_finished(match):
                         is_completed_sheet = True
                     else:
                         wright_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
-                else:
-                    return
-                    
+    
     return is_completed_sheet
 
-def change_tab_color(ws):
-    ws.api.Tab.Color = 0
-    print(ws.name, "は完了状態 → タブ色を変更")
+#エクセルの保存
 
 def save_excel(file_name, output_folder, wb):
     new_file_name = increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
@@ -390,6 +429,8 @@ def save_excel(file_name, output_folder, wb):
 
     wb.save(output_path)
     print(f"保存完了:{new_file_name}")
+
+#GUI化用(未実装)
 
 def run_job(input_folder, output_folder, log_func=None):
 #     app = xw.App(visible=False)
@@ -596,27 +637,12 @@ try:
             print("【処理1】")
             
             for ws in wb.sheets:
-                sheetdata = get_allcells_in_target_sheet(ws)
-
-                if is_target_sheet(ws):
-                    data = read_each_data(sheetdata)
-
-                    if not sheetdata:
-                        continue
-
-                    if not sheetdata["values"]:
-                        continue
-
-                    if not isinstance(sheetdata["values"], list):
-                        continue
-
-                    for r, row in enumerate(sheetdata["values"]):
-                        for c, val in enumerate(row):
-                            process_month_update(ws, r, c, val, data)
+                update_month_on_sheets(ws)
 
             #================================
             #2026年〇月利用分を更新
             #================================
+
             print("【処理2】")
 
             for ws in wb.sheets:
@@ -625,55 +651,16 @@ try:
             #================================
             #n/24回目の更新
             #================================
+
             print("【処理3】")
 
             processed_cells = set()
 
             for ws in wb.sheets:
-                sheetdata = get_allcells_without_fmt(ws)
+                is_completed = update_counts_on_sheets(ws, processed_cells)
 
-                # is_completed_sheet = False
-                
-                data = read_each_data_without_fmt(sheetdata)
-
-                if not data[0]:
-                    continue
-
-                # for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
-                #     for c, val in enumerate(row):    #抜き出した行のセルを走査
-                is_completed_sheet = update_counts(ws,sheetdata, data)
-                        # values, formulas, base_row, base_col = data
-
-                        # if c not in DATE_COLUMNS_2:
-                        #     continue
-
-                        # formula = normalized_formula(formulas, r, c)
-
-                        # if not isinstance(val, (str, datetime)):
-                        #     continue
-                        
-                        # if isinstance(val, str):  #セルの値value)はstr型(文字列)？
-                        #     match = pattern_b.search(val)   #Matchオブジェクト
-
-                        #     if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
-                        #         cell_key = (ws.name, r, c)
-                        #         if cell_key in processed_cells:
-                        #             continue
-                                
-                        #         if is_like_formula(formula, ws, base_row, r, base_col, c):
-                        #             continue
-
-                        #         left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
-                        #         right = match.group(2)
-
-                        #         if is_already_finished(match):
-                        #             is_completed_sheet = True
-                        #         else:
-                        #             wright_update_times_per_24_to_sheet(val, match, ws, base_row, base_col, r, c)
-
-                if is_completed_sheet and is_project_sheet(ws) and not is_black_tab(ws):
+                if is_completed and is_project_sheet(ws) and not is_black_tab(ws):
                     change_tab_color(ws)
-                    continue
 
             #================================
             #Excelファイルの保存
