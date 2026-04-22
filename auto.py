@@ -27,6 +27,8 @@ class ExcelProcessor:
         self.DATE_COLUMNS = [1, 7, 9]
         self.DATE_COLUMNS_2 = [4, 10]
 
+    #処理1
+
     def increment_month_in_filename(self, file_name):
         match = re.search(r"(\d+)月", file_name)
         
@@ -429,8 +431,25 @@ class ExcelProcessor:
         wb.save(output_path)
         print(f"保存完了:{new_file_name}")
 
-    #GUI化用(未実装)
+    #全体実行
+    def run(self):
+        print("【処理1】")
+        for ws in self.wb.sheets:
+            self.update_month_on_sheets(ws)
+        
+        print("【処理2】")
+        for ws in self.wb.sheets:
+            self.update_usage_text(ws)
+        
+        print("【処理3】")
+        processed_cells = set()
+        for ws in self.wb.sheets:
+            is_completed = self.update_counts_on_sheets(ws, processed_cells)
 
+            if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
+                self.change_tab_color(ws)
+
+    #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
     
     #     app = xw.App(visible=False)
@@ -600,23 +619,6 @@ class ExcelProcessor:
     #     ("\n全処理完了！")
         pass
 
-    def run(self):
-        print("【処理1】")
-        for ws in self.wb.sheets:
-            self.update_month_on_sheets(ws)
-        
-        print("【処理2】")
-        for ws in self.wb.sheets:
-            self.update_usage_text(ws)
-        
-        print("【処理3】")
-        processed_cells = set()
-        for ws in self.wb.sheets:
-            is_completed = self.update_counts_on_sheets(ws, processed_cells)
-
-            if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
-                self.change_tab_color(ws)
-
 #================================
 #メイン処理
 #================================
@@ -634,7 +636,7 @@ try:
         print(f"\n処理開始: {file_name}")
         wb = None
 
-        try: #メイン処理
+        try:
             wb = app.books.open(file_path)
             data = {}
 
@@ -644,6 +646,7 @@ try:
         except Exception as e: #エラー時のメッセージ表示
             print(f"エラー発生:{file_name}")
             print(f"内容:{e}")
+
         finally: 
             try:
                 if wb: 
