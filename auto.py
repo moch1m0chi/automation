@@ -10,9 +10,10 @@ output_folder = os.path.join(base_dir, "output")
 
 os.makedirs(output_folder, exist_ok=True)
 
-#正規表現(数値)/(数値)回目をコンパイル
+#正規表現コンパイル
 pattern_a = re.compile(r"(\d{4})年(\d{1,2})月利用分")
 pattern_b = re.compile(r"(\d+)/(\d+回目)")
+pattern_c = re.compile(r"(\d{4})年(\d{1,2})月末")
 
 #================================
 #クラス
@@ -171,8 +172,7 @@ class ExcelProcessor:
         return formula
 
     def is_target_column(self, c):
-        if c in self.DATE_COLUMNS:
-            return True
+        return c in self.DATE_COLUMNS
         
     def is_date_like(self, val):
 
@@ -263,10 +263,12 @@ class ExcelProcessor:
         return pattern_a.sub(repl, text)
 
     def update_usage_text(self, ws):
-        values = ws.used_range.value
+        sheetdata = self.get_allcells_in_target_sheet(ws)
 
-        if not values:
+        if not sheetdata:
             return
+        
+        values, formats, formulas, base_row, base_col = self.read_each_data(sheetdata)
 
         for r, row in enumerate(values):
             for c, val in enumerate(row):
@@ -275,7 +277,7 @@ class ExcelProcessor:
                     new_val = self.increment_year_month_text(val)
                 
                     if new_val != val:
-                        ws.cells(r+1, c+1).value = new_val
+                        ws.cells(base_row + r, base_col + c).value = new_val
                         print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
 
     #処理3
@@ -365,10 +367,9 @@ class ExcelProcessor:
     def is_already_finished(self, match):
         left, right = self.get_count_in_cell(match)
         right_num = int(right.replace("回目", ""))
-        if left == right_num:
-            return True
+        return left == right_num
 
-    def wright_update_counts_to_sheet(self, val, match, ws, base_row, base_col, r, c):
+    def write_update_counts_to_sheet(self, val, match, ws, base_row, base_col, r, c):
         old_val = val
         left, right = self.get_count_in_cell(match)
         new_left = left + 1
@@ -418,9 +419,46 @@ class ExcelProcessor:
                         if self.is_already_finished(match):
                             is_completed_sheet = True
                         else:
-                            self.wright_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
+                            self.write_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
         
         return is_completed_sheet
+
+    #処理4#
+
+    def increment_payday(self, text):
+        def repl(match):
+            year = int(match.group(1))
+            month = int(match.group(2))
+
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+            return f"{year}年{month}月末"
+        return pattern_c.sub(repl, text)
+    
+    def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
+        ws.cells(base_row + r, base_col + c).value = new_val
+        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+
+    def update_payday(self, ws):
+        sheetdata = self.get_allcells_in_target_sheet(ws)
+
+        if not sheetdata:
+            return
+        
+        values, formats, formulas, base_row, base_col = self.read_each_data(sheetdata)
+
+        for r, row in enumerate(values):
+            for c, val in enumerate(row):
+                left_val = values[r][c-1] if c > 0 else None
+                if isinstance(val, str) and str(left_val).strip() == "（参考）請求合意日":
+                    old_val = val
+                    new_val = self.increment_payday(val)
+                
+                    if new_val != val:
+                        self.write_update_payday(ws, old_val, new_val, base_row, base_col, r, c)
 
     #エクセルの保存
 
@@ -448,6 +486,10 @@ class ExcelProcessor:
 
             if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
                 self.change_tab_color(ws)
+        
+        print("【処理4】")
+        for ws in self.wb.sheets:
+            self.update_payday(ws)
 
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
