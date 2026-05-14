@@ -3,6 +3,7 @@ data/
 output/
 *.xlsx
 *.csv
+*.pdf
 
 # Python
 __pycache__/

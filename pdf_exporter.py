@@ -2,8 +2,8 @@ import os
 import xlwings as xw
 
 base_dir = os.path.dirname(os.path.abspath(__file__))
-input_folder = "checked"   # Excelが入ってるフォルダ
-pdf_folder = os.path.join(base_dir, "pdf")
+input_folder = os.path.join(base_dir, "checked")   # Excelが入ってるフォルダ
+pdf_folder = os.path.join(base_dir, "pdf")  #pdf出力先のフォルダ
 
 os.makedirs(pdf_folder, exist_ok=True)
 

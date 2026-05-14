@@ -594,13 +594,13 @@ class ExcelProcessor:
         wb.save(output_path)
         print(f"保存完了:{new_file_name}")
 
-    def export_pdf(self, file_name, output_folder):
-        pdf_name = file_name.replace(".xlsx", ".pdf").replace(".xlsm", ".pdf")
-        pdf_path = os.path.join(output_folder, pdf_name)
+    # def export_pdf(self, file_name, output_folder):
+    #     pdf_name = file_name.replace(".xlsx", ".pdf").replace(".xlsm", ".pdf")
+    #     pdf_path = os.path.join(output_folder, pdf_name)
 
-        self.wb.api.ExportAsFixedFormat(0, pdf_path)
+    #     self.wb.api.ExportAsFixedFormat(0, pdf_path)
 
-        print(f"PDF出力完了: {pdf_name}")
+    #     print(f"PDF出力完了: {pdf_name}")
 
 
     #GUI化用(未実装)
@@ -798,7 +798,7 @@ try:
             processor.run()
 
             processor.save_excel(file_name, output_folder, wb)
-            processor.export_pdf(file_name, output_folder)
+            # processor.export_pdf(file_name, output_folder)
 
         except Exception as e: #エラー時のメッセージ表示
             print(f"エラー発生:{file_name}")
