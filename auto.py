@@ -35,25 +35,30 @@ class ExcelProcessor:
     #================================
     def run(self):
         print("【処理1】")
-        for ws in self.wb.sheets:
-            self.update_month_on_sheets(ws)
-        
-        print("【処理2】")
-        for ws in self.wb.sheets:
-            self.update_usage_text(ws)
-        
-        print("【処理3】")
-        processed_cells = set()
-        for ws in self.wb.sheets:
-            is_completed = self.update_counts_on_sheets(ws, processed_cells)
+        self.process_sheets(self.is_target_sheet, self.update_month_on_sheets)
 
+        print("【処理2】")
+        self.process_sheets(lambda ws: True, self.update_usage_text)
+
+        print("【処理3】")
+        def action_counts(ws):
+            is_completed = self.update_counts_on_sheets(ws, self.processed_cells)
             if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
                 self.change_tab_color(ws)
-        
+
+        self.process_sheets(lambda ws: True, action_counts)
+
         print("【処理4】")
-        for ws in self.wb.sheets:
-            self.update_payday(ws)
+        self.process_sheets(lambda ws: True, self.update_payday)
     
+    #================================
+    #制御系
+    #================================
+    def process_sheets(self, condition_func, action_func):
+        for ws in self.wb.sheets:
+            if condition_func(ws):
+                action_func(ws)
+        
     #================================
     #メインロジック
     #================================
@@ -119,6 +124,10 @@ class ExcelProcessor:
 
                     if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
                         cell_key = (ws.name, r, c)
+                        
+                        old_val = val
+                        new_val = self.transform_count_text(val, match)
+
                         if cell_key in self.processed_cells:
                             continue
                         
@@ -128,7 +137,7 @@ class ExcelProcessor:
                         if self.is_already_finished(match):
                             is_completed_sheet = True
                         else:
-                            self.write_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
+                            self.write_update_counts_to_sheet(ws, base_row, base_col, r, c, old_val, new_val)
         
         return is_completed_sheet
 
@@ -237,17 +246,6 @@ class ExcelProcessor:
             formula = formulas[r][c]
         return formula
     
-    def add_one_month(self, dt):
-        year = dt.year
-        month = dt.month + 1
-        if month > 12:
-            month = 1
-            year += 1
-
-        last_day = calendar.monthrange(year, month)[1]
-        day = min(dt.day, last_day)
-        return dt.replace(year = year, month= month, day = day)
-
     def transform_date_and_month(self, val):
         new_val = None
 
@@ -266,52 +264,27 @@ class ExcelProcessor:
         else:
             return
     
-    def transform_date_and_month_in_filename(self, file_name):
+    def transform_month_in_filename(self, file_name: str) -> str:
         match = re.search(r"(\d+)月", file_name)
-        
-        if match:
-            month = int(match.group(1))
-            new_month = month + 1
 
-            if new_month > 12:
-                new_month = 1
-            
-            # 置き換え
-            new_name = re.sub(r"\d+月", f"{new_month}月", file_name)
-            return new_name
-        else:
-            return file_name  # 月が見つからなければそのまま
+        if not match:
+            return file_name
 
-    def increment_year_month_text(self, text):
-        def repl(match):
-            year = int(match.group(1))
-            month = int(match.group(2))
+        month = int(match.group(1))
+        new_month = self.increment_month(month)
 
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-
-            return f"{year}年{month}月利用分"
-
-        return pattern_a.sub(repl, text)
+        return re.sub(r"\d+月", f"{new_month}月", file_name)
     
-    def increment_payday(self, text):
-        def repl(match):
-            year = int(match.group(1))
-            month = int(match.group(2))
+    def transform_count_text(self, val: str, match):
+        left, right = self.get_count_in_cell(match)
+        new_left, right = self.increment_count(left, right)
 
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-
-            return f"{year}年{month}月末"
-        return pattern_c.sub(repl, text)
-
+        text = f"{new_left}/{right}"
+        return re.sub(r"(\d+)/(\d+回目)", text, val)
+    
     def transform_payday(self, val):
         return self.increment_payday(val)
-    
+        
     #================================
     #書き込み系
     #================================
@@ -327,7 +300,6 @@ class ExcelProcessor:
     def process_month_update(self, ws, r, c, val, data):
         values, formats, formulas, base_row, base_col = data
         # val = row[c] if c < len(row) else None
-
 
         if val is None:
             return
@@ -354,14 +326,9 @@ class ExcelProcessor:
 
         self.write_update_month_to_sheet(ws, base_row, base_col, r, c, val)
 
-    def write_update_counts_to_sheet(self, val, match, ws, base_row, base_col, r, c):
-        old_val = val
-        left, right = self.get_count_in_cell(match)
-        new_left = left + 1
-        text = f"{new_left}/{right}"
-        result = re.sub(r"(\d+)/(\d+回目)", text, val)
-        self.write_cell(ws, base_row, base_col, r, c, result)
-        print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+    def write_update_counts_to_sheet(self, ws, base_row, base_col, r, c, old_val, new_val):
+        self.write_cell(ws, base_row, base_col, r, c, new_val)
+        print("  更新完了:", ws.name, "シート", old_val, "→", new_val, "に更新")
 
     def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
@@ -374,6 +341,7 @@ class ExcelProcessor:
     #================================
     #ユーティリティ
     #================================
+    
     def get_sheet_matrix(self, ws):
         sheetdata = self.get_allcells(ws)
         if not sheetdata:
@@ -576,6 +544,55 @@ class ExcelProcessor:
 
         wb.save(output_path)
         print(f"保存完了:{new_file_name}")
+ 
+    def add_one_month(self, dt):
+        year = dt.year
+        month = dt.month + 1
+        if month > 12:
+            month = 1
+            year += 1
+
+        last_day = calendar.monthrange(year, month)[1]
+        day = min(dt.day, last_day)
+        return dt.replace(year = year, month= month, day = day)
+    
+    def increment_year_month_text(self, text):
+        def repl(match):
+            year = int(match.group(1))
+            month = int(match.group(2))
+
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+            return f"{year}年{month}月利用分"
+
+        return pattern_a.sub(repl, text)
+    
+    def increment_payday(self, text):
+        def repl(match):
+            year = int(match.group(1))
+            month = int(match.group(2))
+
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+            return f"{year}年{month}月末"
+        return pattern_c.sub(repl, text)
+    
+    def increment_month(self, month: int) -> int:
+        month += 1
+        if month > 12:
+            month = 1
+        return month
+    
+    def increment_count(self, left: int, right: str):
+        new_left = left + 1
+        return new_left, right
+    
 
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
