@@ -538,12 +538,6 @@ class ExcelProcessor:
         ws.api.Tab.Color = 0
         print(ws.name, "は完了状態 → タブ色を変更")
 
-    def save_excel(self, file_name, output_folder, wb):
-        new_file_name = self.transform_date_and_month_in_filename(file_name)  #ファイル名の月を繰り上げ
-        output_path = os.path.join(output_folder, new_file_name)
-
-        wb.save(output_path)
-        print(f"保存完了:{new_file_name}")
  
     def add_one_month(self, dt):
         year = dt.year
@@ -592,7 +586,22 @@ class ExcelProcessor:
     def increment_count(self, left: int, right: str):
         new_left = left + 1
         return new_left, right
-    
+
+    def save_excel(self, file_name, output_folder, wb):
+        new_file_name = self.transform_month_in_filename(file_name)  #ファイル名の月を繰り上げ
+        output_path = os.path.join(output_folder, new_file_name)
+
+        wb.save(output_path)
+        print(f"保存完了:{new_file_name}")
+
+    def export_pdf(self, file_name, output_folder):
+        pdf_name = file_name.replace(".xlsx", ".pdf").replace(".xlsm", ".pdf")
+        pdf_path = os.path.join(output_folder, pdf_name)
+
+        self.wb.api.ExportAsFixedFormat(0, pdf_path)
+
+        print(f"PDF出力完了: {pdf_name}")
+
 
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
@@ -787,6 +796,9 @@ try:
 
             processor = ExcelProcessor(wb)
             processor.run()
+
+            processor.save_excel(file_name, output_folder, wb)
+            processor.export_pdf(file_name, output_folder)
 
         except Exception as e: #エラー時のメッセージ表示
             print(f"エラー発生:{file_name}")
