@@ -4,10 +4,12 @@ import xlwings as xw
 import re
 import calendar
     
+#================================
+#ディレクトリ指定
+#================================
 base_dir = os.path.dirname(os.path.abspath(__file__))
 input_folder = os.path.join(base_dir, "data")
 output_folder = os.path.join(base_dir, "output")
-
 os.makedirs(output_folder, exist_ok=True)
 
 #正規表現コンパイル
@@ -28,24 +30,213 @@ class ExcelProcessor:
         self.DATE_COLUMNS = [1, 7, 9]
         self.DATE_COLUMNS_2 = [4, 10]
 
-    #処理1
-
-    def increment_month_in_filename(self, file_name):
-        match = re.search(r"(\d+)月", file_name)
+    #================================
+    #エントリーポイント
+    #================================
+    def run(self):
+        print("【処理1】")
+        for ws in self.wb.sheets:
+            self.update_month_on_sheets(ws)
         
-        if match:
-            month = int(match.group(1))
-            new_month = month + 1
+        print("【処理2】")
+        for ws in self.wb.sheets:
+            self.update_usage_text(ws)
+        
+        print("【処理3】")
+        processed_cells = set()
+        for ws in self.wb.sheets:
+            is_completed = self.update_counts_on_sheets(ws, processed_cells)
 
-            if new_month > 12:
-                new_month = 1
-            
-            # 置き換え
-            new_name = re.sub(r"\d+月", f"{new_month}月", file_name)
-            return new_name
+            if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
+                self.change_tab_color(ws)
+        
+        print("【処理4】")
+        for ws in self.wb.sheets:
+            self.update_payday(ws)
+    
+    #================================
+    #メインロジック
+    #================================
+    def update_month_on_sheets(self,ws):
+
+        if self.is_target_sheet(ws):
+            data = self.get_sheet_matrix(ws)
+            values, formats, formulas, base_row, base_col = data
+            if not data:
+                return
+
+            if not values:
+                return
+
+            if not isinstance(values, list):
+                return
+
+            for r, row in enumerate(values):
+                for c, val in enumerate(row):
+                    self.process_month_update(ws, r, c, val, data)
+
+    def update_usage_text(self, ws):
+        data = self.get_sheet_matrix(ws)
+        if not data:
+            return
+
+        values, formats, formulas, base_row, base_col = data
+
+        for r, row in enumerate(values):
+            for c, val in enumerate(row):
+                if isinstance(val, str):
+                    old_val = val
+                    new_val = self.increment_year_month_text(val)
+                
+                    if new_val != val:
+                        self.write_update_usage_text(ws, old_val, new_val, base_row, base_col, r, c)
+
+    def update_counts_on_sheets(self, ws, processed_cells):
+        sheetdata = self.get_allcells_without_fmt(ws)
+
+        is_completed_sheet = False
+        
+        data = self.read_each_data_without_fmt(sheetdata)
+
+        if not data[0]:
+            return False
+
+        for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
+            for c, val in enumerate(row):    #抜き出した行のセルを走査
+        
+                values, formulas, base_row, base_col = data
+
+                if c not in self.DATE_COLUMNS_2:
+                    continue
+
+                formula = self.normalized_formula(formulas, r, c)
+
+                if not isinstance(val, (str, datetime)):
+                    continue
+                
+                if isinstance(val, str):  #セルの値value)はstr型(文字列)？
+                    match = pattern_b.search(val)   #Matchオブジェクト
+
+                    if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
+                        cell_key = (ws.name, r, c)
+                        if cell_key in self.processed_cells:
+                            continue
+                        
+                        if self.is_like_formula(formula, ws, base_row, base_col, r, c):
+                            continue
+
+                        if self.is_already_finished(match):
+                            is_completed_sheet = True
+                        else:
+                            self.write_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
+        
+        return is_completed_sheet
+
+    def update_payday(self, ws):
+        data = self.get_sheet_matrix(ws)
+        if not data:
+            return
+
+        values, formats, formulas, base_row, base_col = data
+
+        for r, row in enumerate(values):
+            for c, val in enumerate(row):
+
+                if not self.should_update_payday(values, r, c, val):
+                    continue
+
+                new_val = self.increment_payday(val)
+                old_val = val
+
+                if new_val != val:
+                        self.write_update_payday(ws, old_val, new_val, base_row, base_col, r, c)
+
+    #================================
+    #判定系
+    #================================
+    def is_target_sheet(self, ws):
+        return any(k in ws.name for k in self.target_keywords)
+    
+    def is_target_column(self, c):
+        return c in self.DATE_COLUMNS
+    
+    def is_date_like(self, val):
+
+        if isinstance(val, datetime):
+            return True
+
+        elif isinstance(val, (int, float)):
+            return True  # Excelシリアルの可能性
+
+        elif isinstance(val, str):
+            try:
+                datetime.strptime(val, "%Y/%m/%d")
+                return True
+            except:
+                pass
+        
+        return False
+    
+    def is_formula_cell(self, ws, base_row, base_col, r, c):
+        cell_formula = ws.cells(base_row + r, base_col + c).formula
+        return isinstance(cell_formula, str) and cell_formula.startswith("=")
+    
+    def is_project_sheet(self, ws):
+        return "案件" in ws.name
+    
+    def is_black_tab(self, ws):
+        try:
+            color = ws.api.Tab.Color
+            return color == 0 and ws.api.Tab.ColorIndex != -4142
+        except:
+            return False
+        
+    def is_like_formula(self, formula, ws, base_row, base_col, r, c):
+        if formula is None:
+            #fallback 
+            cell_formula = ws.cells(base_row + r, base_col + c).formula
+            return isinstance(cell_formula, str) and cell_formula.startswith("=")
+        
         else:
-            return file_name  # 月が見つからなければそのまま
+            return isinstance(formula, str) and formula.startswith("=")
+        
+    def is_already_finished(self, match):
+        left, right = self.get_count_in_cell(match)
+        right_num = int(right.replace("回目", ""))
+        return left == right_num
 
+    def is_year_month_text(self, text):
+        return isinstance(text, str) and bool(re.search(r"\d{4}年\d{1,2}月", text))
+
+    def should_update_payday(self, values, r, c, val):
+        if not isinstance(val, str):
+            return False
+        if r == 0:
+            return False
+        
+        upper_val = values[r-1][c]
+        if not isinstance(upper_val, str):
+            return False
+
+        # 「2026年1月」みたいな形式か判定
+        return self.is_year_month_text(upper_val)
+
+    #================================
+    #変換系
+    #================================
+
+    def normalized_fmt(self, formats, r, c):
+        fmt = ""
+        if r < len(formats) and c < len(formats[r]):
+            fmt = str(formats[r][c]).lower()
+        return fmt
+
+    def normalized_formula(self, formulas, r, c):
+        formula = None
+        if r < len(formulas) and c < len(formulas[r]):
+            formula = formulas[r][c]
+        return formula
+    
     def add_one_month(self, dt):
         year = dt.year
         month = dt.month + 1
@@ -57,7 +248,7 @@ class ExcelProcessor:
         day = min(dt.day, last_day)
         return dt.replace(year = year, month= month, day = day)
 
-    def update_month(self, val):
+    def transform_date_and_month(self, val):
         new_val = None
 
         if isinstance(val, datetime):
@@ -74,10 +265,163 @@ class ExcelProcessor:
 
         else:
             return
+    
+    def transform_date_and_month_in_filename(self, file_name):
+        match = re.search(r"(\d+)月", file_name)
+        
+        if match:
+            month = int(match.group(1))
+            new_month = month + 1
 
-    def is_target_sheet(self, ws):
-        return any(k in ws.name for k in self.target_keywords)
+            if new_month > 12:
+                new_month = 1
+            
+            # 置き換え
+            new_name = re.sub(r"\d+月", f"{new_month}月", file_name)
+            return new_name
+        else:
+            return file_name  # 月が見つからなければそのまま
 
+    def increment_year_month_text(self, text):
+        def repl(match):
+            year = int(match.group(1))
+            month = int(match.group(2))
+
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+            return f"{year}年{month}月利用分"
+
+        return pattern_a.sub(repl, text)
+    
+    def increment_payday(self, text):
+        def repl(match):
+            year = int(match.group(1))
+            month = int(match.group(2))
+
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+
+            return f"{year}年{month}月末"
+        return pattern_c.sub(repl, text)
+
+    def transform_payday(self, val):
+        return self.increment_payday(val)
+    
+    #================================
+    #書き込み系
+    #================================
+    def write_cell(self, ws, base_row, base_col, r, c, new_val):
+        ws.cells(base_row + r, base_col + c).value = new_val
+    
+    def write_update_month_to_sheet(self, ws, base_row, base_col, r, c, val):
+        if self.transform_date_and_month(val) is not None:
+            new_val = self.transform_date_and_month(val)
+            self.write_cell(ws, base_row, base_col, r, c, new_val)
+            print(" ",new_val, "を入力")
+
+    def process_month_update(self, ws, r, c, val, data):
+        values, formats, formulas, base_row, base_col = data
+        # val = row[c] if c < len(row) else None
+
+
+        if val is None:
+            return
+
+        if not self.is_target_column(c):
+            return
+
+        if self.normalized_fmt(formats, r, c):
+            return
+        # if "yy" not in self.normalized_fmt(formats, r, c):
+        #     return
+
+        if self.normalized_formula(formulas, r, c):
+            return
+
+        if not isinstance(val, (datetime, int, float, str)):
+            return
+
+        if not self.is_date_like(val):
+            return
+
+        if self.is_formula_cell(ws, base_row, base_col, r, c):
+            return
+
+        self.write_update_month_to_sheet(ws, base_row, base_col, r, c, val)
+
+    def write_update_counts_to_sheet(self, val, match, ws, base_row, base_col, r, c):
+        old_val = val
+        left, right = self.get_count_in_cell(match)
+        new_left = left + 1
+        text = f"{new_left}/{right}"
+        result = re.sub(r"(\d+)/(\d+回目)", text, val)
+        self.write_cell(ws, base_row, base_col, r, c, result)
+        print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
+
+    def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
+        self.write_cell(ws, base_row, base_col, r, c, new_val)
+        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+
+    def write_update_usage_text(self, ws, old_val, new_val, base_row, base_col, r, c):
+        self.write_cell(ws, base_row, base_col, r, c, new_val)
+        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+    
+    #================================
+    #ユーティリティ
+    #================================
+    def get_sheet_matrix(self, ws):
+        sheetdata = self.get_allcells(ws)
+        if not sheetdata:
+            return None
+        return self.read_each_data(sheetdata)
+    
+    def get_allcells(self, ws):
+        ur = ws.used_range
+
+        values = ur.value
+        formats = ur.number_format
+        formulas = ur.formula
+
+        if not values:
+            return None
+        
+        if not isinstance(values, list):
+            values = [[values]]
+        elif not isinstance(values[0], list):
+            values = [values]
+
+        rows = len(values)
+        cols = len(values[0])
+
+        if formats is None:
+            formats = [[""] * cols for _ in range(rows)]
+        else:
+            if not isinstance(formats, list):
+                formats = [[formats]]
+            else:
+                formats = [formats]
+        
+        if formulas is None:
+            formulas = [[None] * cols for _ in range(rows)]
+        else:
+            if not isinstance(formulas, list):
+                formulas = [[formulas]]
+            elif not isinstance(formulas[0], list):
+                formulas = [formulas]
+
+        return {
+            "values": values,
+            "formats": formats,
+            "formulas": formulas,
+            "base_row": ur.row,
+            "base_col": ur.column
+        }
+    
     def get_allcells_in_target_sheet(self, ws):
         if not self.is_target_sheet(ws):
             return None
@@ -159,129 +503,6 @@ class ExcelProcessor:
         
         return values, formats, formulas, base_row, base_col
 
-    def normalized_fmt(self, formats, r, c):
-        fmt = ""
-        if r < len(formats) and c < len(formats[r]):
-            fmt = str(formats[r][c]).lower()
-        return fmt
-
-    def normalized_formula(self, formulas, r, c):
-        formula = None
-        if r < len(formulas) and c < len(formulas[r]):
-            formula = formulas[r][c]
-        return formula
-
-    def is_target_column(self, c):
-        return c in self.DATE_COLUMNS
-        
-    def is_date_like(self, val):
-
-        if isinstance(val, datetime):
-            return True
-
-        elif isinstance(val, (int, float)):
-            return True  # Excelシリアルの可能性
-
-        elif isinstance(val, str):
-            try:
-                datetime.strptime(val, "%Y/%m/%d")
-                return True
-            except:
-                pass
-        
-        return False
-
-    def is_formula_cell(self, ws, base_row, r, base_col, c):
-        cell_formula = ws.cells(base_row + r, base_col + c).formula
-        return isinstance(cell_formula, str) and cell_formula.startswith("=")
-
-    def write_update_month_to_sheet(self, ws, base_row, r, base_col, c, val):
-        if self.update_month(val) is not None:
-            ws.cells(base_row + r, base_col + c).value = self.update_month(val)
-            print(" ",self.update_month(val), "を入力")
-
-    def process_month_update(self, ws, r, c, val, data):
-        values, formats, formulas, base_row, base_col = data
-        # val = row[c] if c < len(row) else None
-
-        if val is None:
-            return
-
-        if not self.is_target_column(c):
-            return
-
-        if self.normalized_fmt(formats, r, c):
-            return
-
-        if self.normalized_formula(formulas, r, c):
-            return
-
-        if not isinstance(val, (datetime, int, float, str)):
-            return
-
-        if not self.is_date_like(val):
-            return
-
-        if self.is_formula_cell(ws, base_row, r, base_col, c):
-            return
-
-        self.write_update_month_to_sheet(ws, base_row, r, base_col, c, val)
-
-    def update_month_on_sheets(self,ws):
-        sheetdata = self.get_allcells_in_target_sheet(ws)
-
-        if self.is_target_sheet(ws):
-            data = self.read_each_data(sheetdata)
-
-            if not sheetdata:
-                return
-
-            if not sheetdata["values"]:
-                return
-
-            if not isinstance(sheetdata["values"], list):
-                return
-
-            for r, row in enumerate(sheetdata["values"]):
-                for c, val in enumerate(row):
-                    self.process_month_update(ws, r, c, val, data)
-
-    #処理2
-
-    def increment_year_month_text(self, text):
-        def repl(match):
-            year = int(match.group(1))
-            month = int(match.group(2))
-
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-
-            return f"{year}年{month}月利用分"
-
-        return pattern_a.sub(repl, text)
-
-    def update_usage_text(self, ws):
-        sheetdata = self.get_allcells_in_target_sheet(ws)
-
-        if not sheetdata:
-            return
-        
-        values, formats, formulas, base_row, base_col = self.read_each_data(sheetdata)
-
-        for r, row in enumerate(values):
-            for c, val in enumerate(row):
-                if isinstance(val, str):
-                    old_val = val
-                    new_val = self.increment_year_month_text(val)
-                
-                    if new_val != val:
-                        ws.cells(base_row + r, base_col + c).value = new_val
-                        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
-
-    #処理3
-
     def get_allcells_without_fmt(self, ws):
         ur = ws.range("A1:N400")
         values = ur.value
@@ -340,156 +561,21 @@ class ExcelProcessor:
         
         return values, formulas, base_row, base_col
 
-    def is_project_sheet(self, ws):
-        return "案件" in ws.name
-
-    def is_black_tab(self, ws):
-        try:
-            color = ws.api.Tab.Color
-            return color == 0 and ws.api.Tab.ColorIndex != -4142
-        except:
-            return False
-
-    def is_like_formula(self, formula, ws, base_row, r, base_col, c):
-        if formula is None:
-            #fallback 
-            cell_formula = ws.cells(base_row + r, base_col + c).formula
-            return isinstance(cell_formula, str) and cell_formula.startswith("=")
-        
-        else:
-            return isinstance(formula, str) and formula.startswith("=")
-
     def get_count_in_cell(self, match):
         left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
         right = match.group(2)
         return left, right
 
-    def is_already_finished(self, match):
-        left, right = self.get_count_in_cell(match)
-        right_num = int(right.replace("回目", ""))
-        return left == right_num
-
-    def write_update_counts_to_sheet(self, val, match, ws, base_row, base_col, r, c):
-        old_val = val
-        left, right = self.get_count_in_cell(match)
-        new_left = left + 1
-        text = f"{new_left}/{right}"
-        result = re.sub(r"(\d+)/(\d+回目)", text, val)
-        ws.cells(base_row + r, base_col + c).value = result   #f文字列g
-        print("  更新完了:", ws.name, "シート", old_val,"→", result, "に更新")
-
     def change_tab_color(self, ws):
         ws.api.Tab.Color = 0
         print(ws.name, "は完了状態 → タブ色を変更")
 
-    def update_counts_on_sheets(self, ws, processed_cells):
-        sheetdata = self.get_allcells_without_fmt(ws)
-
-        is_completed_sheet = False
-        
-        data = self.read_each_data_without_fmt(sheetdata)
-
-        if not data[0]:
-            return False
-
-        for r, row in enumerate(sheetdata["values"]):  #行を抜き出し
-            for c, val in enumerate(row):    #抜き出した行のセルを走査
-        
-                values, formulas, base_row, base_col = data
-
-                if c not in self.DATE_COLUMNS_2:
-                    continue
-
-                formula = self.normalized_formula(formulas, r, c)
-
-                if not isinstance(val, (str, datetime)):
-                    continue
-                
-                if isinstance(val, str):  #セルの値value)はstr型(文字列)？
-                    match = pattern_b.search(val)   #Matchオブジェクト
-
-                    if match:   #matchの中身があるとTrueとして判定される。NoneだとFalse扱い
-                        cell_key = (ws.name, r, c)
-                        if cell_key in self.processed_cells:
-                            continue
-                        
-                        if self.is_like_formula(formula, ws, base_row, r, base_col, c):
-                            continue
-
-                        if self.is_already_finished(match):
-                            is_completed_sheet = True
-                        else:
-                            self.write_update_counts_to_sheet(val, match, ws, base_row, base_col, r, c)
-        
-        return is_completed_sheet
-
-    #処理4#
-
-    def increment_payday(self, text):
-        def repl(match):
-            year = int(match.group(1))
-            month = int(match.group(2))
-
-            month += 1
-            if month > 12:
-                month = 1
-                year += 1
-
-            return f"{year}年{month}月末"
-        return pattern_c.sub(repl, text)
-    
-    def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
-        ws.cells(base_row + r, base_col + c).value = new_val
-        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
-
-    def update_payday(self, ws):
-        sheetdata = self.get_allcells_in_target_sheet(ws)
-
-        if not sheetdata:
-            return
-        
-        values, formats, formulas, base_row, base_col = self.read_each_data(sheetdata)
-
-        for r, row in enumerate(values):
-            for c, val in enumerate(row):
-                left_val = values[r][c-1] if c > 0 else None
-                if isinstance(val, str) and str(left_val).strip() == "（参考）請求合意日":
-                    old_val = val
-                    new_val = self.increment_payday(val)
-                
-                    if new_val != val:
-                        self.write_update_payday(ws, old_val, new_val, base_row, base_col, r, c)
-
-    #エクセルの保存
-
     def save_excel(self, file_name, output_folder, wb):
-        new_file_name = self.increment_month_in_filename(file_name)  #ファイル名の月を繰り上げ
+        new_file_name = self.transform_date_and_month_in_filename(file_name)  #ファイル名の月を繰り上げ
         output_path = os.path.join(output_folder, new_file_name)
 
         wb.save(output_path)
         print(f"保存完了:{new_file_name}")
-
-    #全体実行
-    def run(self):
-        print("【処理1】")
-        for ws in self.wb.sheets:
-            self.update_month_on_sheets(ws)
-        
-        print("【処理2】")
-        for ws in self.wb.sheets:
-            self.update_usage_text(ws)
-        
-        print("【処理3】")
-        processed_cells = set()
-        for ws in self.wb.sheets:
-            is_completed = self.update_counts_on_sheets(ws, processed_cells)
-
-            if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
-                self.change_tab_color(ws)
-        
-        print("【処理4】")
-        for ws in self.wb.sheets:
-            self.update_payday(ws)
 
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
