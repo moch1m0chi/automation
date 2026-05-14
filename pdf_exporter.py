@@ -1,8 +1,9 @@
 import os
 import xlwings as xw
 
-input_folder = "output"   # Excelが入ってるフォルダ
-pdf_folder = "pdf"
+base_dir = os.path.dirname(os.path.abspath(__file__))
+input_folder = "checked"   # Excelが入ってるフォルダ
+pdf_folder = os.path.join(base_dir, "pdf")
 
 os.makedirs(pdf_folder, exist_ok=True)
 
@@ -19,6 +20,9 @@ try:
         pdf_path = os.path.join(pdf_folder, pdf_name)
 
         wb = None
+
+        print("保存先:", pdf_path)
+        print("存在:", os.path.exists(pdf_path))
 
         try:
             print(f"PDF変換開始: {file_name}")
