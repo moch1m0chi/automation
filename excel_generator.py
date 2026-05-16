@@ -26,21 +26,21 @@ class ExcelProcessor:
         self.wb = wb
         self.processed_cells = set()
 
-        self.target_keywords = ["確定合意書", "DMM（秀", "御請求書","支払"]
-        self.DATE_COLUMNS = [1, 7, 9]
+        self.target_keywords = ["確定合意書", "DMM（秀", "御請求書","支払", "ガソリン販売"]
+        self.DATE_COLUMNS = [1, 6, 7, 9]
         self.DATE_COLUMNS_2 = [4, 10]
 
     #================================
     #エントリーポイント
     #================================
     def run(self):
-        print("【処理1】")
+        print("【処理1】") # 処理1 : 確定合意書シート等の日付セルを次の月に繰り上げる
         self.process_sheets(self.is_target_sheet, self.update_month_on_sheets)
 
-        print("【処理2】")
+        print("【処理2】") # 処理2 : ガソリン代シート等の「YYYY年M月分」の月を次の月に繰り上げる
         self.process_sheets(lambda ws: True, self.update_usage_text)
 
-        print("【処理3】")
+        print("【処理3】") # 処理3 : 案件シート等の「n/24回目」の形式の回数をひとつ繰り上げる
         def action_counts(ws):
             is_completed = self.update_counts_on_sheets(ws, self.processed_cells)
             if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
@@ -48,13 +48,13 @@ class ExcelProcessor:
 
         self.process_sheets(lambda ws: True, action_counts)
 
-        print("【処理4】")
+        print("【処理4】") #処理4 : 支払予定日の月を次の月に繰り上げる
         self.process_sheets(lambda ws: True, self.update_payday)
     
     #================================
     #制御系
     #================================
-    def process_sheets(self, condition_func, action_func):
+    def process_sheets(self, condition_func, action_func): # Excelブック中の各シートについて条件を満たしたらアクションを行う
         for ws in self.wb.sheets:
             if condition_func(ws):
                 action_func(ws)
@@ -62,7 +62,7 @@ class ExcelProcessor:
     #================================
     #メインロジック
     #================================
-    def update_month_on_sheets(self,ws):
+    def update_month_on_sheets(self,ws): # 処理1のメインプロセス
 
         if self.is_target_sheet(ws):
             data = self.get_sheet_matrix(ws)
@@ -76,7 +76,7 @@ class ExcelProcessor:
             if not isinstance(values, list):
                 return
 
-            for r, row in enumerate(values):
+            for r, row in enumerate(values): 
                 for c, val in enumerate(row):
                     self.process_month_update(ws, r, c, val, data)
 
@@ -163,13 +163,13 @@ class ExcelProcessor:
     #================================
     #判定系
     #================================
-    def is_target_sheet(self, ws):
+    def is_target_sheet(self, ws): # 更新対象のシートか判定
         return any(k in ws.name for k in self.target_keywords)
     
-    def is_target_column(self, c):
+    def is_target_column(self, c): # データの入っている列か判定。エクセル内部では日付も普通の数値とされるため
         return c in self.DATE_COLUMNS
     
-    def is_date_like(self, val):
+    def is_date_like(self, val): # 日付データっぽいか。日付型だけでなくstr型で入力されている場合の対策
 
         if isinstance(val, datetime):
             return True
@@ -186,21 +186,21 @@ class ExcelProcessor:
         
         return False
     
-    def is_formula_cell(self, ws, base_row, base_col, r, c):
+    def is_formula_cell(self, ws, base_row, base_col, r, c): # 変数セルか判定。セル参照している場合に参照先+該当セルで二重に日付が変更されることへの対策
         cell_formula = ws.cells(base_row + r, base_col + c).formula
         return isinstance(cell_formula, str) and cell_formula.startswith("=")
     
-    def is_project_sheet(self, ws):
+    def is_project_sheet(self, ws): # シート名に案件の文字があるか
         return "案件" in ws.name
     
-    def is_black_tab(self, ws):
+    def is_black_tab(self, ws): # シートのタブが黒=更新対象外か
         try:
             color = ws.api.Tab.Color
             return color == 0 and ws.api.Tab.ColorIndex != -4142
         except:
             return False
         
-    def is_like_formula(self, formula, ws, base_row, base_col, r, c):
+    def is_like_formula(self, formula, ws, base_row, base_col, r, c): # 変数セルっぽいか判定isformulacellでうまくいかなかったので実装、いずれ統一したい
         if formula is None:
             #fallback 
             cell_formula = ws.cells(base_row + r, base_col + c).formula
@@ -209,15 +209,15 @@ class ExcelProcessor:
         else:
             return isinstance(formula, str) and formula.startswith("=")
         
-    def is_already_finished(self, match):
+    def is_already_finished(self, match): # 対象の案件シートの回数n/24回目は終了しているか
         left, right = self.get_count_in_cell(match)
         right_num = int(right.replace("回目", ""))
         return left == right_num
 
-    def is_year_month_text(self, text):
+    def is_year_month_text(self, text): # YYYY年MM月の形式か
         return isinstance(text, str) and bool(re.search(r"\d{4}年\d{1,2}月", text))
 
-    def should_update_payday(self, values, r, c, val):
+    def should_update_payday(self, values, r, c, val): # 更新されるべき支払日セルか
         if not isinstance(val, str):
             return False
         if r == 0:
@@ -234,19 +234,19 @@ class ExcelProcessor:
     #変換系
     #================================
 
-    def normalized_fmt(self, formats, r, c):
+    def normalized_fmt(self, formats, r, c): #フォーマット標準化
         fmt = ""
         if r < len(formats) and c < len(formats[r]):
             fmt = str(formats[r][c]).lower()
         return fmt
 
-    def normalized_formula(self, formulas, r, c):
+    def normalized_formula(self, formulas, r, c): # 数式標準化
         formula = None
         if r < len(formulas) and c < len(formulas[r]):
             formula = formulas[r][c]
         return formula
     
-    def transform_date_and_month(self, val):
+    def transform_date_and_month(self, val): # 月日を変換
         new_val = None
 
         if isinstance(val, datetime):
@@ -264,7 +264,7 @@ class ExcelProcessor:
         else:
             return
     
-    def transform_month_in_filename(self, file_name: str) -> str:
+    def transform_month_in_filename(self, file_name: str) -> str: # ファイル名の月を変換
         match = re.search(r"(\d+)月", file_name)
 
         if not match:
@@ -275,29 +275,29 @@ class ExcelProcessor:
 
         return re.sub(r"\d+月", f"{new_month}月", file_name)
     
-    def transform_count_text(self, val: str, match):
+    def transform_count_text(self, val: str, match): #n/24回目のテキストを変換
         left, right = self.get_count_in_cell(match)
         new_left, right = self.increment_count(left, right)
 
         text = f"{new_left}/{right}"
         return re.sub(r"(\d+)/(\d+回目)", text, val)
     
-    def transform_payday(self, val):
+    def transform_payday(self, val): # 支払日を変換
         return self.increment_payday(val)
         
     #================================
     #書き込み系
     #================================
-    def write_cell(self, ws, base_row, base_col, r, c, new_val):
+    def write_cell(self, ws, base_row, base_col, r, c, new_val): # Excelのセルに直接書き込み
         ws.cells(base_row + r, base_col + c).value = new_val
     
-    def write_update_month_to_sheet(self, ws, base_row, base_col, r, c, val):
+    def write_update_month_to_sheet(self, ws, base_row, base_col, r, c, val): #更新した月を
         if self.transform_date_and_month(val) is not None:
             new_val = self.transform_date_and_month(val)
             self.write_cell(ws, base_row, base_col, r, c, new_val)
             print(" ",new_val, "を入力")
 
-    def process_month_update(self, ws, r, c, val, data):
+    def process_month_update(self, ws, r, c, val, data): # 判定式を適用
         values, formats, formulas, base_row, base_col = data
         # val = row[c] if c < len(row) else None
 
@@ -342,13 +342,13 @@ class ExcelProcessor:
     #ユーティリティ
     #================================
     
-    def get_sheet_matrix(self, ws):
+    def get_sheet_matrix(self, ws): # シートの行列を取得
         sheetdata = self.get_allcells(ws)
         if not sheetdata:
             return None
         return self.read_each_data(sheetdata)
     
-    def get_allcells(self, ws):
+    def get_allcells(self, ws): # シートの全セルを取得
         ur = ws.used_range
 
         values = ur.value
@@ -390,7 +390,7 @@ class ExcelProcessor:
             "base_col": ur.column
         }
     
-    def get_allcells_in_target_sheet(self, ws):
+    def get_allcells_in_target_sheet(self, ws): # 対象セルのセルをすべて取得、月更新用に使用
         if not self.is_target_sheet(ws):
             return None
         
@@ -435,7 +435,7 @@ class ExcelProcessor:
             "base_col": ur.column
             }
 
-    def read_each_data(self, sheetdata):
+    def read_each_data(self, sheetdata): # 各データの読み込み
         if not sheetdata:
             return None, None, None, None, None
         
@@ -471,7 +471,7 @@ class ExcelProcessor:
         
         return values, formats, formulas, base_row, base_col
 
-    def get_allcells_without_fmt(self, ws):
+    def get_allcells_without_fmt(self, ws): #フォーマット形式以外のセルをすべて取り込み、今思えば別にいらなかった
         ur = ws.range("A1:N400")
         values = ur.value
         formulas = ur.formula
@@ -502,7 +502,7 @@ class ExcelProcessor:
             "base_col" : ur.column
         }
 
-    def read_each_data_without_fmt(self, data):
+    def read_each_data_without_fmt(self, data): #フォーマット形式以外のデータをすべて読み込み、今思えば別にいらなかった
         if not data:
             return None, None, None, None
         
@@ -529,26 +529,36 @@ class ExcelProcessor:
         
         return values, formulas, base_row, base_col
 
-    def get_count_in_cell(self, match):
+    def get_count_in_cell(self, match): # セルの回数を取得、leftがn、rightが/24回目
         left = int(match.group(1))  #matchオブジェクトのmatch(1)、ここでは(/d+)に相当する部分
         right = match.group(2)
         return left, right
 
-    def change_tab_color(self, ws):
+    def change_tab_color(self, ws): #シートタブ色を変更、案件シートが終了している際に使用する
         ws.api.Tab.Color = 0
         print(ws.name, "は完了状態 → タブ色を変更")
 
  
-    def add_one_month(self, dt):
+    def add_one_month(self, dt): # ひと月繰り上げ、セルの日付が月末であれば更新後も月末日を維持する
         year = dt.year
         month = dt.month + 1
         if month > 12:
             month = 1
             year += 1
 
-        last_day = calendar.monthrange(year, month)[1]
-        day = min(dt.day, last_day)
-        return dt.replace(year = year, month= month, day = day)
+        # 元の日付が月末か判定
+        last_day_current = calendar.monthrange(dt.year, dt.month)[1]
+        is_month_end = dt.day == last_day_current
+
+        # 次の月の末日
+        last_day_next = calendar.monthrange(year, month)[1]
+
+        if is_month_end:
+            day = last_day_next  # ← 月末なら次も月末
+        else:
+            day = min(dt.day, last_day_next)
+
+        return dt.replace(year=year, month=month, day=day)
     
     def increment_year_month_text(self, text):
         def repl(match):
