@@ -1,6 +1,7 @@
 # データ系
 data/
 output/
+pdf/
 *.xlsx
 *.csv
 *.pdf
@@ -11,3 +12,5 @@ __pycache__/
 
 # 環境
 .env
+
+.venv/
