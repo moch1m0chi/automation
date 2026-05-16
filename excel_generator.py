@@ -154,11 +154,16 @@ class ExcelProcessor:
                 if not self.should_update_payday(values, r, c, val):
                     continue
 
+                formula = self.normalized_formula(formulas, r, c)
+                if self.is_like_formula(formula, ws, base_row, base_col, r, c):
+                    continue
+
                 new_val = self.increment_payday(val)
                 old_val = val
+                if new_val == val:
+                    continue
 
-                if new_val != val:
-                        self.write_update_payday(ws, old_val, new_val, base_row, base_col, r, c)
+                self.write_update_payday(ws, old_val, new_val, base_row, base_col, r, c)
 
     #================================
     #判定系
@@ -214,21 +219,32 @@ class ExcelProcessor:
         right_num = int(right.replace("回目", ""))
         return left == right_num
 
-    def is_year_month_text(self, text): # YYYY年MM月の形式か
-        return isinstance(text, str) and bool(re.search(r"\d{4}年\d{1,2}月", text))
+    def is_year_month_like(self, val):
+        if isinstance(val, datetime):
+            return True
 
-    def should_update_payday(self, values, r, c, val): # 更新されるべき支払日セルか
+        if isinstance(val, (int, float)):
+            try:
+                dt = datetime(1899, 12, 30) + timedelta(days=val)
+                return True
+            except:
+                return False
+
+        if isinstance(val, str):
+            return bool(re.search(r"\d{4}年\d{1,2}月", val))
+
+        return False
+
+    def should_update_payday(self, values, r, c, val):
         if not isinstance(val, str):
             return False
+
         if r == 0:
             return False
-        
-        upper_val = values[r-1][c]
-        if not isinstance(upper_val, str):
-            return False
 
-        # 「2026年1月」みたいな形式か判定
-        return self.is_year_month_text(upper_val)
+        upper_val = values[r-1][c]
+
+        return self.is_year_month_like(upper_val)
 
     #================================
     #変換系
