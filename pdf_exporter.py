@@ -31,6 +31,9 @@ def clean_company(name):
     name = re.sub("有限会社", "", name)
     return name
 
+def save_pdf(ws, pdf_filepath):
+    ws.api.ExportAsFixedFormat(0, pdf_filepath)
+
 
 try:
     for file_name in os.listdir(input_folder):
@@ -69,6 +72,7 @@ try:
                     month_match = re.search(r"(\d+)月", file_name)
                     month = str(month_match.group(1))
 
+                    # 支払先情報をシートから取得
                     payee = None
                     values = ws.range("A1:B3").value
 
@@ -87,7 +91,7 @@ try:
                     pn_pdf_path = os.path.join(pdf_folder, f"{pay_notice_name}.pdf")
 
                     try:
-                        ws.api.ExportAsFixedFormat(0, pn_pdf_path)
+                        save_pdf(ws, pn_pdf_path)
                         print(f"支払通知書: {pay_notice_name}")
                     except Exception as e:
                         print(f"エラー: {ws.name} / {e}")
@@ -122,7 +126,8 @@ try:
                     dmm_filename = f"【{company}様】支払通知書_{month}月"
 
                     dmm_path = os.path.join(pdf_folder, f"{dmm_filename}.pdf")
-                    wb.app.api.ActiveSheet.ExportAsFixedFormat(0, dmm_path)
+                    save_pdf(ws, dmm_path)
+                    wb.api.ActiveSheet.ExportAsFixedFormat(0, dmm_path)
                     print("PDF出力 : ", dmm_filename, ".pdf")
 
                 elif "キュービクル" in wb.name:
@@ -134,7 +139,7 @@ try:
                     cm_filename = f"【{company}様】請求内訳_{month}月"
 
                     cm_path = os.path.join(pdf_folder, f"{cm_filename}.pdf")
-                    wb.app.api.ActiveSheet.ExportAsFixedFormat(0, cm_path)
+                    save_pdf(ws, cm_path)
                     print("PDF出力 : ", cm_filename, ".pdf")
                 
                 else:
