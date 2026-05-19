@@ -1,18 +1,52 @@
 import os
 import xlwings as xw
 import re
+from pathlib import Path
 
+
+#-----------------------------------------------
+# 条件定義、今回はシートが支払通知書か否かの判定のみ
+#-----------------------------------------------
 target_keywords = ["支払通知書"]
 
-base_dir = os.path.dirname(os.path.abspath(__file__))
-input_folder = os.path.join(base_dir, "checked")   # Excelが入ってるフォルダ
-pdf_folder = os.path.join(base_dir, "pdf")  #pdf出力先のフォルダ
+#-----------------------------------------------
+# 分岐ルール
+#-----------------------------------------------
+RULES = [
+    {
+        "keyword": "DMM",
+        "filename": lambda company_name, month: f"【{company_name}】支払通知書_{month}月",
+        "exclude": lambda sheets: [s for s in sheets if "明細" not in s],
+    },
+    {
+        "keyword": "キュービクル",
+        "filename": lambda company_name, month: f"【{company_name}】請求内訳_{month}月",
+        "exclude": lambda sheets: sheets,
+    }
+]
 
-os.makedirs(pdf_folder, exist_ok=True)
+#-----------------------------------------------
+# ディレクトリ指定
+#-----------------------------------------------
+
+base_dir = Path(__file__).resolve().parent
+input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
+pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
+
+pdf_folder.mkdir(parents=True, exist_ok=True)
 
 app = xw.App(visible=False)
 app.display_alerts = False
 
+#-----------------------------------------------
+# 関数
+#-----------------------------------------------
+
+# プロセス系
+
+
+
+# 判定系
 def is_black_tab(ws):
     try:
         return ws.api.Tab.Color == 0 and ws.api.Tab.ColorIndex != -4142
@@ -21,6 +55,26 @@ def is_black_tab(ws):
     
 def is_payment_notification(ws):
     return any(k in ws.name for k in target_keywords)
+
+def is_out_of_scope(file_name):
+    return (
+        not file_name.endswith((".xlsx", ".xlsm")) 
+        or file_name.startswith("~$")
+    )
+        
+
+# 変換系
+
+def get_month(file_name):
+    month_match = re.search(r"(\d+)月", file_name)
+    return str(month_match.group(1))
+
+# ユーティリティ
+
+def get_company_name(base_name):
+    pattern = re.compile(r"[【（]([^】(]+?様)[】_）]")
+    match = pattern.search(base_name)
+    return str(match.group(1))
 
 def clean_company(name):
     name = name.replace("\n", "")
@@ -31,46 +85,58 @@ def clean_company(name):
     name = re.sub("有限会社", "", name)
     return name
 
-def save_pdf(ws, pdf_filepath):
+# pdf保存
+def output_payment_notification(ws, pdf_filepath):
     ws.api.ExportAsFixedFormat(0, pdf_filepath)
 
+def output_pdf(new_wb, pdf_filepath):
+    new_wb.api.ExportAsFixedFormat(0, pdf_filepath)
+
+#-------------------------------------------------------------------------------------------------------------------------------
+
+#-----------------------------------------------
+# 実行部
+#-----------------------------------------------
 
 try:
-    for file_name in os.listdir(input_folder):
-        if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
+    for file_path in input_folder.iterdir():
+        file_name = file_path.name
+
+        if is_out_of_scope(file_name):
             continue
 
-        file_path = os.path.join(input_folder, file_name)
-        pdf_name = file_name.replace(".xlsx", ".pdf").replace(".xlsm", ".pdf")
-        pdf_path = os.path.join(pdf_folder, pdf_name)
+        file_path = input_folder / file_name
+
+        base_name = Path(file_name).stem  # 拡張子除去
+        pdf_name = base_name + ".pdf"
+        
+        company_name = get_company_name(base_name)
+
+        save_folder = pdf_folder / company_name
+        save_folder.mkdir(parents=True, exist_ok=True)
+        
+        pdf_path = save_folder / pdf_name
 
         wb = None
 
         try:
-            print(f"PDF変換開始: {file_name}")
+            print(f"\nPDF変換開始: {file_name}")
 
-            wb = app.books.open(file_path)
+            wb = app.books.open(str(file_path))
             target_sheets = []
 
             for ws in wb.sheets:
 
                 # 黒タブはスキップ
                 if is_black_tab(ws):
-                    print(f"スキップ（黒タブ）: {ws.name}")
+                    print(f" →スキップ（黒タブ）: {ws.name}")
                     continue
-
-                if "DMM" in wb.name:
-                    if "明細" in ws.name:
-                        continue
 
                 # 支払通知書は個別PDF
                 if is_payment_notification(ws):
-                    company_match = re.search(r'【(.+?)様】', file_name)
-                    company = str(company_match.group(1))
-                    company_text = f"（{company}様分）"
+                    company = get_company_name(file_name)
 
-                    month_match = re.search(r"(\d+)月", file_name)
-                    month = str(month_match.group(1))
+                    month = get_month(file_name)
 
                     # 支払先情報をシートから取得
                     payee = None
@@ -88,11 +154,12 @@ try:
                     payee = clean_company(payee)
 
                     pay_notice_name = f"【{payee}様】支払通知書（{company}様分）_{month}月"
-                    pn_pdf_path = os.path.join(pdf_folder, f"{pay_notice_name}.pdf")
+                    pn_pdf_path = save_folder / f"{pay_notice_name}.pdf"
+
 
                     try:
-                        save_pdf(ws, pn_pdf_path)
-                        print(f"支払通知書: {pay_notice_name}")
+                        output_payment_notification(ws, str(pn_pdf_path))
+                        print(f"PDF出力 : {pay_notice_name}.pdf")
                     except Exception as e:
                         print(f"エラー: {ws.name} / {e}")
 
@@ -113,40 +180,58 @@ try:
 
             target_sheets = valid_sheets
 
-            wb.sheets[target_sheets].select()
-
             if target_sheets:
+                for rule in RULES:
+                    if rule["keyword"] in wb.name:
+                        target_sheets = rule["exclude"](target_sheets)
+                        wb.sheets[target_sheets].api.Copy()
+                        new_wb = xw.books.active
 
-                if "DMM" in wb.name:
-                    company_match = re.search(r'【(.+?)様】', file_name)
-                    company = str(company_match.group(1))
+                        filename = rule["filename"](company_name, month)
+                        path = save_folder / f"{filename}.pdf"
 
-                    month_match = re.search(r"(\d+)月", file_name)
-                    month = str(month_match.group(1))
-                    dmm_filename = f"【{company}様】支払通知書_{month}月"
-
-                    dmm_path = os.path.join(pdf_folder, f"{dmm_filename}.pdf")
-                    save_pdf(ws, dmm_path)
-                    wb.api.ActiveSheet.ExportAsFixedFormat(0, dmm_path)
-                    print("PDF出力 : ", dmm_filename, ".pdf")
-
-                elif "キュービクル" in wb.name:
-                    company_match = re.search(r'[（(](.+?)様', file_name)
-                    company = str(company_match.group(1))
-                
-                    month_match = re.search(r"(\d+)月", file_name)
-                    month = str(month_match.group(1))
-                    cm_filename = f"【{company}様】請求内訳_{month}月"
-
-                    cm_path = os.path.join(pdf_folder, f"{cm_filename}.pdf")
-                    save_pdf(ws, cm_path)
-                    print("PDF出力 : ", cm_filename, ".pdf")
-                
+                        output_pdf(new_wb, str(path))
+                        break
                 else:
-                    wb.app.api.ActiveSheet.ExportAsFixedFormat(0, pdf_path)
-                    print("PDF出力 : ", pdf_name,)
+                    # デフォルト処理
+                    wb.sheets[target_sheets].api.Copy()
+                    new_wb = xw.books.active
+                    output_pdf(new_wb, str(pdf_path))
 
-                print("----作業完了、次のファイルへ----")
+                # if "DMM" in wb.name:
+                #     target_sheets = [s for s in target_sheets if "明細" not in s]
+                #     wb.sheets[target_sheets].api.Copy()
+                #     new_wb = xw.books.active
+
+                #     month = get_month(file_name)
+                #     dmm_filename = f"【{company_name}】支払通知書_{month}月"
+                #     dmm_path = save_folder / f"{dmm_filename}.pdf"
+
+                #     output_pdf(new_wb, str(dmm_path))
+                #     print(f"PDF出力 : {dmm_filename}.pdf")
+                #     new_wb.close()
+
+                # elif "キュービクル" in wb.name:
+                    
+                #     wb.sheets[target_sheets].api.Copy()
+                #     new_wb = xw.books.active
+                
+                #     month = get_month(file_name)
+                #     cm_filename = f"【{company_name}】請求内訳_{month}月"
+                #     cm_path = save_folder / f"{cm_filename}.pdf"
+
+                #     output_pdf(new_wb, str(cm_path))
+                #     print(f"PDF出力 : {cm_filename}.pdf")
+                #     new_wb.close()
+                
+                # else:
+                #     wb.sheets[target_sheets].api.Copy()
+                #     new_wb = xw.books.active
+                #     output_pdf(new_wb, str(pdf_path))
+                #     print(f"PDF出力 : {pdf_name}")
+                #     new_wb.close()
+
+                print("----pdf出力完了----")
 
         except Exception as e:
             print(f"エラー: {file_name} / {e}")
