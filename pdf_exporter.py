@@ -16,7 +16,6 @@ target_keywords = ["支払通知書"]
 
 # DMM
 # ファイル名指定 : 【○○様】支払通知書_n月.pdf
-# 3枚の支払通知書をひとつのpdfにまとめる
 
 # キュービクル  
 # ファイル名指定 : 【○○様】請求内訳_ 2月.pdf
@@ -24,19 +23,32 @@ target_keywords = ["支払通知書"]
 RULES = [
     {
         "keyword": "DMM",
-        "filename": lambda company_name, month: f"【{company_name}】支払通知書_{month}月",
+        "match": lambda wb: "DMM" in wb.name,
         "filter_sheets": lambda sheets: [s for s in sheets if "明細" not in s],
+        "build_filename": lambda c, m: f"【{c}】支払通知書_{m}月",
+        "executor": "special"
     },
     {
         "keyword": "キュービクル",
-        "filename": lambda company_name, month: f"【{company_name}】請求内訳_{month}月",
+        "match": lambda wb: "キュービクル" in wb.name,
         "filter_sheets": lambda sheets: sheets,
+        "build_filename": lambda c, m: f"【{c}】請求内訳_{m}月",
+        "executor": "special"
     }
 ]
 
+DEFAULT_RULE = {
+    "name": "default",
+    "filter_sheets": lambda sheets: sheets,
+    "build_filename": None,  # 使わないならNoneでOK
+    "executor": "default"
+}
+
+
 #-----------------------------------------------
-# 共通ディレクトリ指定
+# ベースディレクトリ指定
 #-----------------------------------------------
+base_dir = Path(__file__).resolve().parent
 
 base_dir = Path(__file__).resolve().parent
 input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
@@ -62,36 +74,36 @@ def export_payment_notification(ws, company_name, month, save_folder):
 
     try:
         output_payment_notification(ws, str(pn_pdf_path))
-        print(f"支払通知書出力 : {pay_notice_name}.pdf")
+        log(f"支払通知書出力 : {pay_notice_name}.pdf")
     except Exception as e:
-        print(f"エラー: {ws.name} / {e}")
+        log(f"エラー: {ws.name} / {e}")
 
     return
 
-def export_renamed_pdf(wb, rule, target_sheets, company_name, month, save_folder):
+def export_renamed_pdf(wb, rule, target_sheets, company_name, month, save_folder, pdf_name):
     target_sheets = rule["filter_sheets"](target_sheets)
-
     new_wb = create_temp_workbook(wb, target_sheets)
 
-    new_pdf_name = replace_file_name_specified(rule, company_name, month)
+    # new_pdf_name = replace_file_name_specified(rule, company_name, month)
+    new_pdf_name = rule["build_filename"](company_name, month)
     renamed_path = create_pdf_file_path(save_folder, new_pdf_name)
 
     output_pdf(new_wb, str(renamed_path))
-    print(f"PDF出力 : {new_pdf_name}.pdf")
+    log(f"PDF出力 : {new_pdf_name}.pdf")
 
-def export_pdf(wb, target_sheets, pdf_path, pdf_name):
-
+def export_pdf(wb, rule, target_sheets, copany_name, month, save_folder, pdf_name):
+    pdf_path = save_folder / pdf_name
     new_wb = create_temp_workbook(wb, target_sheets)
 
     output_pdf(new_wb, str(pdf_path))
-    print(f"PDF出力 : {pdf_name}")
+    log(f"PDF出力 : {pdf_name}")
 
 # 判定系
 def is_black_tab(ws):
     try:
         return ws.api.Tab.Color == 0 and ws.api.Tab.ColorIndex != -4142
     except Exception as e:
-        print(f"エラー内容: {e}")
+        log(f"エラー内容: {e}")
         return False
     
 def is_payment_notification(ws):
@@ -107,7 +119,7 @@ def find_rule(wb_name, RULES):
     for rule in RULES:
         if rule["keyword"] in wb_name:
             return rule
-    return None
+    return DEFAULT_RULE
 
 # 変換系
 def clean_company(name): # 様は抜けて出力されるので注意！
@@ -131,11 +143,23 @@ def exclude_invisible_sheets(wb, target_sheets):
             if sheet.api.Visible == -1:
                 valid_sheets.append(name)
         except:
-            print(f"{name} は存在しない")
+            log(f"{name} は存在しない")
 
     return valid_sheets
 
 # ユーティリティ
+
+def paths(base_dir):
+
+    input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
+    pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
+
+    pdf_folder.mkdir(parents=True, exist_ok=True)   # フォルダがなかった場合は作成
+
+    return {
+        "input" : input_folder,
+        "output" : pdf_folder
+    }
 
 def get_month(file_name):
     month_match = re.search(r"(\d+)月", file_name)
@@ -172,6 +196,9 @@ def create_temp_workbook(wb, target_sheets):
 def create_pdf_file_path(save_folder, pdf_name):
     return save_folder / f"{pdf_name}.pdf"
 
+def log(msg):
+    print(msg)
+
 
 # pdf出力
 def output_payment_notification(ws, pdf_filepath):  # シート出力
@@ -179,6 +206,14 @@ def output_payment_notification(ws, pdf_filepath):  # シート出力
 
 def output_pdf(new_wb, pdf_filepath):   # ブックをまとめて出力
     new_wb.api.ExportAsFixedFormat(0, pdf_filepath)
+
+#-----------------------------------------------
+# executors
+#-----------------------------------------------
+EXECUTORS = {
+    "special": export_renamed_pdf,
+    "default": export_pdf,
+}
 
 #-------------------------------------------------------------------------------------------------------------------------------
 
@@ -208,7 +243,7 @@ try:
         wb = None
 
         try:
-            print(f"\nPDF変換開始: {file_name}")
+            log(f"\nPDF変換開始: {file_name}")
 
             # xlsxファイルを開く
             wb = app.books.open(str(file_path))
@@ -219,7 +254,7 @@ try:
             for ws in wb.sheets:
 
                 if is_black_tab(ws):    # 黒タブ=既に終わっている案件はスルー
-                    print(f" →スキップ（黒タブ）: {ws.name}")
+                    log(f" →スキップ（黒タブ）: {ws.name}")
                     continue
 
                 # 支払通知書は個別PDFで出力
@@ -235,20 +270,16 @@ try:
 
             # まとめたシートの一括出力
             if target_sheets:
-                
-                for rule in RULES:
-                    if rule["keyword"] in wb.name:
-                        # ファイル名の変更が必要な場合の処理
-                        export_renamed_pdf(wb, rule, target_sheets, company_name, month, save_folder)
-                        break
-                else:
-                    # デフォルト処理
-                    export_pdf(wb, target_sheets, pdf_path, pdf_name)
 
-                print("----pdf出力完了----")
+                rule = find_rule(base_name, RULES)
+                
+                executor = EXECUTORS[rule["executor"]]
+                executor(wb, rule, target_sheets, company_name, month, save_folder, pdf_name)
+
+                log("----pdf出力完了----")
 
         except Exception as e:
-            print(f"エラー: {file_name} / {e}")
+            log(f"エラー: {file_name} / {e}")
 
         finally:
             if wb:
@@ -257,4 +288,4 @@ try:
 finally:
     app.quit()
 
-print("全PDF変換完了！")
+log("全PDF変換完了！")
