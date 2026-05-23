@@ -3,7 +3,6 @@ import xlwings as xw
 import re
 from pathlib import Path
 
-
 #-----------------------------------------------
 # 条件定義、今回はシートが支払通知書か否かの判定のみ
 #-----------------------------------------------
@@ -14,14 +13,10 @@ target_keywords = ["支払通知書"]
 # 分岐ルール
 #-----------------------------------------------
 
-# DMM
-# ファイル名指定 : 【○○様】支払通知書_n月.pdf
-
-# キュービクル  
-# ファイル名指定 : 【○○様】請求内訳_ 2月.pdf
-
 RULES = [
     {
+        # DMM
+        # ファイル名指定 : 【○○様】支払通知書_n月.pdf
         "keyword": "DMM",
         "match": lambda wb: "DMM" in wb.name,
         "filter_sheets": lambda sheets: [s for s in sheets if "明細" not in s],
@@ -29,6 +24,8 @@ RULES = [
         "executor": "special"
     },
     {
+        # キュービクル  
+        # ファイル名指定 : 【○○様】請求内訳_ n月.pdf
         "keyword": "キュービクル",
         "match": lambda wb: "キュービクル" in wb.name,
         "filter_sheets": lambda sheets: sheets,
@@ -40,24 +37,32 @@ RULES = [
 DEFAULT_RULE = {
     "name": "default",
     "filter_sheets": lambda sheets: sheets,
-    "build_filename": None,  # 使わないならNoneでOK
+    "build_filename": None,  # 使わないのでnone
     "executor": "default"
 }
 
-
 #-----------------------------------------------
-# ベースディレクトリ指定
+# rules、インフラ初期化
 #-----------------------------------------------
-base_dir = Path(__file__).resolve().parent
 
-base_dir = Path(__file__).resolve().parent
-input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
-pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
+def build_paths(base_dir):
+    input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
+    pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
 
-pdf_folder.mkdir(parents=True, exist_ok=True)   # フォルダがなかった場合は作成
+    pdf_folder.mkdir(parents=True, exist_ok=True)   # フォルダがなかった場合は作成
 
-app = xw.App(visible=False)
-app.display_alerts = False
+    return {
+        "input" : input_folder,
+        "output" : pdf_folder 
+    }
+
+def init_excel_app():
+    app = xw.App(visible=False)
+    app.display_alerts = False
+    return app
+
+# app = xw.App(visible=False)
+# app.display_alerts = False
 
 #-----------------------------------------------
 # 関数
@@ -147,6 +152,32 @@ def exclude_invisible_sheets(wb, target_sheets):
 
     return valid_sheets
 
+def build_file_context(file_path, pdf_root):
+    file_name = file_path.name
+    base_name = Path(file_name).stem
+
+    company = get_company_name(base_name)
+    month = get_month(base_name)
+
+    if not company:
+        raise ValueError(f"会社名取得失敗: {base_name}")
+    
+    save_folder = pdf_root / company
+    save_folder.mkdir(parents=True, exist_ok=True)
+    
+    pdf_name = base_name + ".pdf"
+    pdf_path = save_folder / pdf_name
+
+    return {
+        "file_name" : file_name,
+        "base_name" : base_name,
+        "company" : company,
+        "month" : month,
+        "save_folder" : save_folder,
+        "pdf_name" : pdf_name,
+        "pdf_path" : pdf_path
+    }
+
 # ユーティリティ
 
 def paths(base_dir):
@@ -199,7 +230,6 @@ def create_pdf_file_path(save_folder, pdf_name):
 def log(msg):
     print(msg)
 
-
 # pdf出力
 def output_payment_notification(ws, pdf_filepath):  # シート出力
     ws.api.ExportAsFixedFormat(0, pdf_filepath)
@@ -210,6 +240,7 @@ def output_pdf(new_wb, pdf_filepath):   # ブックをまとめて出力
 #-----------------------------------------------
 # executors
 #-----------------------------------------------
+
 EXECUTORS = {
     "special": export_renamed_pdf,
     "default": export_pdf,
@@ -222,28 +253,23 @@ EXECUTORS = {
 #-----------------------------------------------
 
 try:
-    for file_path in input_folder.iterdir():
-        file_name = file_path.name
+    base_dir = Path(__file__).resolve().parent
 
-        if is_out_of_scope(file_name):
+    paths = build_paths(base_dir)
+
+    app = init_excel_app()
+
+    for file_path in paths["input"].iterdir():
+
+        if is_out_of_scope(file_path.name):
             continue
-        
-        # pdf出力用の情報を抽出
-        base_name = Path(file_name).stem  # 拡張子除去
-        company_name = get_company_name(base_name)
-        month = get_month(base_name)
-        pdf_name = base_name + ".pdf"
 
-        # 保存先の各社フォルダを作成
-        save_folder = pdf_folder / company_name
-        save_folder.mkdir(parents=True, exist_ok=True)
-        
-        pdf_path = save_folder / pdf_name
+        ctx = build_file_context(file_path, paths["output"])
 
         wb = None
 
         try:
-            log(f"\nPDF変換開始: {file_name}")
+            log(f"\nPDF変換開始: {ctx["file_name"]}")
 
             # xlsxファイルを開く
             wb = app.books.open(str(file_path))
@@ -260,7 +286,7 @@ try:
                 # 支払通知書は個別PDFで出力
                 if is_payment_notification(ws):
 
-                    export_payment_notification(ws, company_name, month, save_folder)
+                    export_payment_notification(ws, ctx["company"], ctx["month"], ctx["save_folder"])
 
                 # それ以外はまとめ用に追加
                 target_sheets.append(ws.name)
@@ -271,15 +297,15 @@ try:
             # まとめたシートの一括出力
             if target_sheets:
 
-                rule = find_rule(base_name, RULES)
+                rule = find_rule(ctx["base_name"], RULES)
                 
                 executor = EXECUTORS[rule["executor"]]
-                executor(wb, rule, target_sheets, company_name, month, save_folder, pdf_name)
+                executor(wb, rule, target_sheets, ctx["company"], ctx["month"], ctx["save_folder"], ctx["pdf_name"])
 
                 log("----pdf出力完了----")
 
         except Exception as e:
-            log(f"エラー: {file_name} / {e}")
+            log(f"エラー: {ctx["file_name"]} / {e}")
 
         finally:
             if wb:

@@ -3,14 +3,15 @@ from datetime import datetime, timedelta
 import xlwings as xw
 import re
 import calendar
+from pathlib import Path
     
 #================================
 #ディレクトリ指定
 #================================
-base_dir = os.path.dirname(os.path.abspath(__file__))
-input_folder = os.path.join(base_dir, "data")
-output_folder = os.path.join(base_dir, "output")
-os.makedirs(output_folder, exist_ok=True)
+base_dir = Path(__file__).resolve().parent
+input_folder = base_dir / "data"
+output_folder = base_dir / "output"
+output_folder.mkdir(parents=True, exist_ok=True)
 
 #正規表現コンパイル
 pattern_a = re.compile(r"(\d{4})年(\d{1,2})月利用分")
@@ -18,7 +19,16 @@ pattern_b = re.compile(r"(\d+)/(\d+回目)")
 pattern_c = re.compile(r"(\d{4})年(\d{1,2})月末")
 
 #================================
-#クラス
+#インフラ初期化
+#================================
+def init_excel_app():
+    app = xw.App(visible=False)
+    app.screen_updating = False
+    app.display_alerts = False
+    return app
+
+#================================
+#クラス化
 #================================
 
 class ExcelProcessor:
@@ -35,10 +45,16 @@ class ExcelProcessor:
     #================================
     def run(self):
         print("【処理1】") # 処理1 : 確定合意書シート等の日付セルを次の月に繰り上げる
-        self.process_sheets(self.is_target_sheet, self.update_month_on_sheets)
+        self.process_sheets(
+            self.is_target_sheet, # プロセス実行の条件
+            self.update_month_on_sheets # 条件を満たすとき実行
+        )
 
         print("【処理2】") # 処理2 : ガソリン代シート等の「YYYY年M月分」の月を次の月に繰り上げる
-        self.process_sheets(lambda ws: True, self.update_usage_text)
+        self.process_sheets(
+            lambda ws: True, 
+            self.update_usage_text
+        )
 
         print("【処理3】") # 処理3 : 案件シート等の「n/24回目」の形式の回数をひとつ繰り上げる
         def action_counts(ws):
@@ -46,10 +62,16 @@ class ExcelProcessor:
             if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
                 self.change_tab_color(ws)
 
-        self.process_sheets(lambda ws: True, action_counts)
+        self.process_sheets(
+            lambda ws: True, 
+            action_counts
+        )
 
         print("【処理4】") #処理4 : 支払予定日の月を次の月に繰り上げる
-        self.process_sheets(lambda ws: True, self.update_payday)
+        self.process_sheets(
+            lambda ws: True, 
+            self.update_payday
+        )
     
     #================================
     #制御系
@@ -202,7 +224,8 @@ class ExcelProcessor:
         try:
             color = ws.api.Tab.Color
             return color == 0 and ws.api.Tab.ColorIndex != -4142
-        except:
+        except Exception as e:
+            print(f"エラー内容: {e}")
             return False
         
     def is_like_formula(self, formula, ws, base_row, base_col, r, c): # 変数セルっぽいか判定isformulacellでうまくいかなかったので実装、いずれ統一したい
@@ -227,7 +250,8 @@ class ExcelProcessor:
             try:
                 dt = datetime(1899, 12, 30) + timedelta(days=val)
                 return True
-            except:
+            except Exception as e:
+                print(f"エラー内容: {e}")
                 return False
 
         if isinstance(val, str):
@@ -620,15 +644,6 @@ class ExcelProcessor:
         wb.save(output_path)
         print(f"保存完了:{new_file_name}")
 
-    # def export_pdf(self, file_name, output_folder):
-    #     pdf_name = file_name.replace(".xlsx", ".pdf").replace(".xlsm", ".pdf")
-    #     pdf_path = os.path.join(output_folder, pdf_name)
-
-    #     self.wb.api.ExportAsFixedFormat(0, pdf_path)
-
-    #     print(f"PDF出力完了: {pdf_name}")
-
-
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
     
@@ -802,12 +817,15 @@ class ExcelProcessor:
 #================================
 #メイン処理
 #================================
-app = xw.App(visible=False)
-app.screen_updating = False
-app.display_alerts = False
+app = init_excel_app()
+
+# app = xw.App(visible=False)
+# app.screen_updating = False
+# app.display_alerts = False
 
 try:
-    for file_name in os.listdir(input_folder):
+    for file_path in input_folder.iterdir():
+        file_name = file_path.name
         if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
             continue
             
@@ -822,6 +840,8 @@ try:
 
             processor = ExcelProcessor(wb)
             processor.run()
+
+            print("うおｗ")
 
             processor.save_excel(file_name, output_folder, wb)
             # processor.export_pdf(file_name, output_folder)
