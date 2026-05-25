@@ -243,21 +243,46 @@ class ExcelProcessor:
         return left == right_num
 
     def is_year_month_like(self, val):
-        if isinstance(val, datetime):
-            return True
+        return self.parse_year_month(val) is not None
+        # # datetimeはOK
+        # if isinstance(val, datetime):
+        #     return True
 
-        if isinstance(val, (int, float)):
-            try:
-                dt = datetime(1899, 12, 30) + timedelta(days=val)
-                return True
-            except Exception as e:
-                print(f"エラー内容: {e}")
-                return False
+        # # 数値（Excel日付）の場合
+        # if isinstance(val, (int, float)):
+        #     if val <= 0:
+        #         return False
 
-        if isinstance(val, str):
-            return bool(re.search(r"\d{4}年\d{1,2}月", val))
+        #     # Excel日付の現実的な範囲（1900〜2100くらい）
+        #     if not (1 <= val <= 60000):
+        #         return False
 
-        return False
+        #     return True
+
+        # # 文字列の場合
+        # if isinstance(val, str):
+        #     return bool(re.search(r"\d{4}年\d{1,2}月", val))
+
+        # return False
+    # def is_year_month_like(self, val):
+    #     if isinstance(val, datetime):
+    #         return True
+
+    #     if val <= 0:
+    #         return None
+
+    #     if isinstance(val, (int, float)):
+    #         try:
+    #             dt = datetime(1899, 12, 30) + timedelta(days=val)
+    #             return True
+    #         except Exception as e:
+    #             print(f"エラー内容: {e} {val}")
+    #             return False
+
+    #     if isinstance(val, str):
+    #         return bool(re.search(r"\d{4}年\d{1,2}月", val))
+
+    #     return False
 
     def should_update_payday(self, values, r, c, val):
         if not isinstance(val, str):
@@ -324,6 +349,38 @@ class ExcelProcessor:
     
     def transform_payday(self, val): # 支払日を変換
         return self.increment_payday(val)
+    
+    def parse_year_month(self, val):
+        # ① datetime
+        if isinstance(val, datetime):
+            return val.year, val.month
+
+        # ② Excelシリアル値
+        if isinstance(val, (int, float)):
+            if not (1 <= val <= 60000):
+                return None
+
+            try:
+                dt = datetime(1899, 12, 30) + timedelta(days=val)
+                return dt.year, dt.month
+            except:
+                return None
+
+        # ③ 文字列（2024年5月）
+        if isinstance(val, str):
+            m = re.search(r"(\d{4})年(\d{1,2})月", val)
+            if not m:
+                return None
+
+            year = int(m.group(1))
+            month = int(m.group(2))
+
+            if not (1 <= month <= 12):
+                return None
+
+            return year, month
+
+        return None
         
     #================================
     #書き込み系
@@ -840,8 +897,6 @@ try:
 
             processor = ExcelProcessor(wb)
             processor.run()
-
-            print("うおｗ")
 
             processor.save_excel(file_name, output_folder, wb)
             # processor.export_pdf(file_name, output_folder)
