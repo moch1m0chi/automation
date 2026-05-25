@@ -4,14 +4,15 @@ import xlwings as xw
 import re
 import calendar
 from pathlib import Path
+import argparse
     
 #================================
 #ディレクトリ指定
 #================================
-base_dir = Path(__file__).resolve().parent
-input_folder = base_dir / "data"
-output_folder = base_dir / "output"
-output_folder.mkdir(parents=True, exist_ok=True)
+# base_dir = Path(__file__).resolve().parent
+# input_folder = base_dir / "data"
+# output_folder = base_dir / "output"
+# output_folder.mkdir(parents=True, exist_ok=True)
 
 #正規表現コンパイル
 pattern_a = re.compile(r"(\d{4})年(\d{1,2})月利用分")
@@ -28,7 +29,7 @@ def init_excel_app():
     return app
 
 #================================
-#クラス化
+#クラス定義
 #================================
 
 class ExcelProcessor:
@@ -244,45 +245,6 @@ class ExcelProcessor:
 
     def is_year_month_like(self, val):
         return self.parse_year_month(val) is not None
-        # # datetimeはOK
-        # if isinstance(val, datetime):
-        #     return True
-
-        # # 数値（Excel日付）の場合
-        # if isinstance(val, (int, float)):
-        #     if val <= 0:
-        #         return False
-
-        #     # Excel日付の現実的な範囲（1900〜2100くらい）
-        #     if not (1 <= val <= 60000):
-        #         return False
-
-        #     return True
-
-        # # 文字列の場合
-        # if isinstance(val, str):
-        #     return bool(re.search(r"\d{4}年\d{1,2}月", val))
-
-        # return False
-    # def is_year_month_like(self, val):
-    #     if isinstance(val, datetime):
-    #         return True
-
-    #     if val <= 0:
-    #         return None
-
-    #     if isinstance(val, (int, float)):
-    #         try:
-    #             dt = datetime(1899, 12, 30) + timedelta(days=val)
-    #             return True
-    #         except Exception as e:
-    #             log(f"エラー内容: {e} {val}")
-    #             return False
-
-    #     if isinstance(val, str):
-    #         return bool(re.search(r"\d{4}年\d{1,2}月", val))
-
-    #     return False
 
     def should_update_payday(self, values, r, c, val):
         if not isinstance(val, str):
@@ -875,47 +837,71 @@ class ExcelProcessor:
         pass
 
 #================================
-#メイン処理
+#アプリケーション制御
 #================================
-app = init_excel_app()
+def run_batch(input_folder, output_folder):
+    app = init_excel_app()
 
-# app = xw.App(visible=False)
-# app.screen_updating = False
-# app.display_alerts = False
+    try:
+        for file_path in input_folder.iterdir():
+            file_name = file_path.name
+            if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
+                continue
+                
+            file_path = os.path.join(input_folder, file_name)
 
-try:
-    for file_path in input_folder.iterdir():
-        file_name = file_path.name
-        if not file_name.endswith((".xlsx", ".xlsm")) or file_name.startswith("~$"):
-            continue
-            
-        file_path = os.path.join(input_folder, file_name)
+            print(f"\n処理開始: {file_name}")
+            wb = None
 
-        print(f"\n処理開始: {file_name}")
-        wb = None
-
-        try:
-            wb = app.books.open(file_path)
-            data = {}
-
-            processor = ExcelProcessor(wb)
-            processor.run()
-
-            processor.save_excel(file_name, output_folder, wb)
-            # processor.export_pdf(file_name, output_folder)
-
-        except Exception as e: #エラー時のメッセージ表示
-            print(f"エラー発生:{file_name}")
-            print(f"内容:{e}")
-
-        finally: 
             try:
-                if wb: 
-                    wb.close()
-            except:
-                print("えらー")
-                pass
-finally:
-    app.quit()
+                wb = app.books.open(file_path)
+                data = {}
 
-print("\n全処理完了！")
+                processor = ExcelProcessor(wb)
+                processor.run()
+
+                processor.save_excel(file_name, output_folder, wb)
+                # processor.export_pdf(file_name, output_folder)
+
+            except Exception as e: #エラー時のメッセージ表示
+                print(f"エラー発生:{file_name}")
+                print(f"内容:{e}")
+
+            finally: 
+                try:
+                    if wb: 
+                        wb.close()
+                except:
+                    print("えらー")
+                    pass
+    finally:
+        app.quit()
+
+    print("\n全処理完了！")
+
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--input", default="data")
+    parser.add_argument("--output", default="output")
+
+    return parser.parse_args()
+
+#================================
+#エントリーポイント
+#================================
+
+def main():
+    args = parse_args()
+
+    base_dir = Path(__file__).resolve().parent
+    input_folder = base_dir / args.input
+    output_folder = base_dir / args.output
+    output_folder.mkdir(parents=True, exist_ok=True)
+
+    run_batch(input_folder, output_folder)
+
+if __name__ == "__main__":
+    main()
