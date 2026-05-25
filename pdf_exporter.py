@@ -4,12 +4,6 @@ import re
 from pathlib import Path
 
 #-----------------------------------------------
-# 条件定義、今回はシートが支払通知書か否かの判定のみ
-#-----------------------------------------------
-
-target_keywords = ["支払通知書"]
-
-#-----------------------------------------------
 # 分岐ルール
 #-----------------------------------------------
 
@@ -45,6 +39,8 @@ DEFAULT_RULE = {
 # rules、インフラ初期化
 #-----------------------------------------------
 
+target_keywords = ["支払通知書"]
+
 def build_paths(base_dir):
     input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
     pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
@@ -61,9 +57,6 @@ def init_excel_app():
     app.display_alerts = False
     return app
 
-# app = xw.App(visible=False)
-# app.display_alerts = False
-
 #-----------------------------------------------
 # 関数
 #-----------------------------------------------
@@ -71,10 +64,10 @@ def init_excel_app():
 # 制御系
 
 # メインロジック
-def export_payment_notification(ws, company_name, month, save_folder):
+def export_payment_notification(ws, company, month, save_folder):
     payee = get_payee_name(ws)
 
-    pay_notice_name = f"【{payee}様】支払通知書（{company_name}分）_{month}月"
+    pay_notice_name = f"【{payee}様】支払通知書（{company}分）_{month}月"
     pn_pdf_path = create_pdf_file_path(save_folder, pay_notice_name)
 
     try:
@@ -85,12 +78,11 @@ def export_payment_notification(ws, company_name, month, save_folder):
 
     return
 
-def export_renamed_pdf(wb, rule, target_sheets, company_name, month, save_folder, pdf_name):
+def export_renamed_pdf(wb, rule, target_sheets, company, month, save_folder, pdf_name):
     target_sheets = rule["filter_sheets"](target_sheets)
     new_wb = create_temp_workbook(wb, target_sheets)
 
-    # new_pdf_name = replace_file_name_specified(rule, company_name, month)
-    new_pdf_name = rule["build_filename"](company_name, month)
+    new_pdf_name = rule["build_filename"](company, month)
     renamed_path = create_pdf_file_path(save_folder, new_pdf_name)
 
     output_pdf(new_wb, str(renamed_path))
@@ -136,8 +128,8 @@ def clean_company(name): # 様は抜けて出力されるので注意！
     name = re.sub("有限会社", "", name)
     return name
 
-def replace_file_name_specified(rule, company_name, month):
-    return rule["filename"](company_name, month)
+def replace_file_name_specified(rule, company, month):
+    return rule["filename"](company, month)
 
 def exclude_invisible_sheets(wb, target_sheets):
     valid_sheets = []
@@ -223,6 +215,9 @@ def create_temp_workbook(wb, target_sheets):
     wb.sheets[target_sheets].api.Copy()
     new_wb = xw.books.active
     return new_wb
+
+def create_pn_file_name(payee, company, month):
+    return f"【{payee}様】支払通知書（{company}分）_{month}月"
 
 def create_pdf_file_path(save_folder, pdf_name):
     return save_folder / f"{pdf_name}.pdf"
@@ -314,4 +309,4 @@ try:
 finally:
     app.quit()
 
-log("全PDF変換完了！")
+log("\n全PDF変換完了！")

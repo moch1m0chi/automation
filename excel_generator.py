@@ -44,19 +44,19 @@ class ExcelProcessor:
     #エントリーポイント
     #================================
     def run(self):
-        print("【処理1】") # 処理1 : 確定合意書シート等の日付セルを次の月に繰り上げる
+        self.log("【処理1】") # 処理1 : 確定合意書シート等の日付セルを次の月に繰り上げる
         self.process_sheets(
             self.is_target_sheet, # プロセス実行の条件
             self.update_month_on_sheets # 条件を満たすとき実行
         )
 
-        print("【処理2】") # 処理2 : ガソリン代シート等の「YYYY年M月分」の月を次の月に繰り上げる
+        self.log("【処理2】") # 処理2 : ガソリン代シート等の「YYYY年M月分」の月を次の月に繰り上げる
         self.process_sheets(
             lambda ws: True, 
             self.update_usage_text
         )
 
-        print("【処理3】") # 処理3 : 案件シート等の「n/24回目」の形式の回数をひとつ繰り上げる
+        self.log("【処理3】") # 処理3 : 案件シート等の「n/24回目」の形式の回数をひとつ繰り上げる
         def action_counts(ws):
             is_completed = self.update_counts_on_sheets(ws, self.processed_cells)
             if is_completed and self.is_project_sheet(ws) and not self.is_black_tab(ws):
@@ -67,7 +67,7 @@ class ExcelProcessor:
             action_counts
         )
 
-        print("【処理4】") #処理4 : 支払予定日の月を次の月に繰り上げる
+        self.log("【処理4】") #処理4 : 支払予定日の月を次の月に繰り上げる
         self.process_sheets(
             lambda ws: True, 
             self.update_payday
@@ -225,7 +225,7 @@ class ExcelProcessor:
             color = ws.api.Tab.Color
             return color == 0 and ws.api.Tab.ColorIndex != -4142
         except Exception as e:
-            print(f"エラー内容: {e}")
+            self.log(f"エラー内容: {e}")
             return False
         
     def is_like_formula(self, formula, ws, base_row, base_col, r, c): # 変数セルっぽいか判定isformulacellでうまくいかなかったので実装、いずれ統一したい
@@ -276,7 +276,7 @@ class ExcelProcessor:
     #             dt = datetime(1899, 12, 30) + timedelta(days=val)
     #             return True
     #         except Exception as e:
-    #             print(f"エラー内容: {e} {val}")
+    #             log(f"エラー内容: {e} {val}")
     #             return False
 
     #     if isinstance(val, str):
@@ -392,7 +392,7 @@ class ExcelProcessor:
         if self.transform_date_and_month(val) is not None:
             new_val = self.transform_date_and_month(val)
             self.write_cell(ws, base_row, base_col, r, c, new_val)
-            print(" ",new_val, "を入力")
+            self.log(f" {new_val}を入力")
 
     def process_month_update(self, ws, r, c, val, data): # 判定式を適用
         values, formats, formulas, base_row, base_col = data
@@ -425,15 +425,15 @@ class ExcelProcessor:
 
     def write_update_counts_to_sheet(self, ws, base_row, base_col, r, c, old_val, new_val):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        print("  更新完了:", ws.name, "シート", old_val, "→", new_val, "に更新")
+        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
 
     def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
 
     def write_update_usage_text(self, ws, old_val, new_val, base_row, base_col, r, c):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        print(" ", ws.name, "シート:", old_val, "→", new_val,"に更新")
+        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
     
     #================================
     #ユーティリティ
@@ -633,7 +633,7 @@ class ExcelProcessor:
 
     def change_tab_color(self, ws): #シートタブ色を変更、案件シートが終了している際に使用する
         ws.api.Tab.Color = 0
-        print(ws.name, "は完了状態 → タブ色を変更")
+        self.log(f"{ws.name} は完了状態 → タブ色を変更")
 
  
     def add_one_month(self, dt): # ひと月繰り上げ、セルの日付が月末であれば更新後も月末日を維持する
@@ -693,13 +693,16 @@ class ExcelProcessor:
     def increment_count(self, left: int, right: str):
         new_left = left + 1
         return new_left, right
+    
+    def log(self, msg):
+        print(msg)
 
     def save_excel(self, file_name, output_folder, wb):
         new_file_name = self.transform_month_in_filename(file_name)  #ファイル名の月を繰り上げ
         output_path = os.path.join(output_folder, new_file_name)
 
         wb.save(output_path)
-        print(f"保存完了:{new_file_name}")
+        self.log(f"保存完了 : {new_file_name}")
 
     #GUI化用(未実装)
     def run_job(input_folder, output_folder, log_func=None):
