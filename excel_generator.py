@@ -5,6 +5,8 @@ import re
 import calendar
 from pathlib import Path
 import argparse
+import logging
+import traceback
     
 #================================
 #ディレクトリ指定
@@ -657,7 +659,7 @@ class ExcelProcessor:
         return new_left, right
     
     def log(self, msg):
-        print(msg)
+        logging.info(msg)
 
     def save_excel(self, file_name, output_folder, wb):
         new_file_name = self.transform_month_in_filename(file_name)  #ファイル名の月を繰り上げ
@@ -850,7 +852,7 @@ def run_batch(input_folder, output_folder):
                 
             file_path = os.path.join(input_folder, file_name)
 
-            print(f"\n処理開始: {file_name}")
+            logging.info(f"\n処理開始: {file_name}")
             wb = None
 
             try:
@@ -864,22 +866,42 @@ def run_batch(input_folder, output_folder):
                 # processor.export_pdf(file_name, output_folder)
 
             except Exception as e: #エラー時のメッセージ表示
-                print(f"エラー発生:{file_name}")
-                print(f"内容:{e}")
+                logging.error(f"エラー発生:{file_name}")
+                logging.error(f"内容:{e}")
+                logging.error(traceback.format_exc())
 
             finally: 
                 try:
                     if wb: 
                         wb.close()
                 except:
-                    print("えらー")
+                    logging.error("えらー")
                     pass
     finally:
         app.quit()
 
-    print("\n全処理完了！")
+    logging.info("\n全処理完了！")
 
+def setup_logging(base_dir):
+    log_path = base_dir / "log.txt"
 
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # ファイル
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    # コンソール
+    ch = logging.StreamHandler()
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -889,17 +911,24 @@ def parse_args():
 
     return parser.parse_args()
 
+
 #================================
 #エントリーポイント
 #================================
 
 def main():
+    
     args = parse_args()
 
     base_dir = Path(__file__).resolve().parent
     input_folder = base_dir / args.input
     output_folder = base_dir / args.output
+
     output_folder.mkdir(parents=True, exist_ok=True)
+
+    setup_logging(base_dir)
+
+    logging.info("処理開始")
 
     run_batch(input_folder, output_folder)
 
