@@ -1,4 +1,4 @@
 @echo off
 cd /d %~dp0
-python pdf_exporter.py
+python src/pdf_exporter.py
 pause
