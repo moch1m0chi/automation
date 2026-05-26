@@ -229,6 +229,7 @@ class ExcelProcessor:
             return color == 0 and ws.api.Tab.ColorIndex != -4142
         except Exception as e:
             self.log(f"エラー内容: {e}")
+            logging.error(traceback.format_exc())
             return False
         
     def is_like_formula(self, formula, ws, base_row, base_col, r, c): # 変数セルっぽいか判定isformulacellでうまくいかなかったので実装、いずれ統一したい
@@ -910,7 +911,6 @@ def parse_args():
     parser.add_argument("--output", default="output")
 
     return parser.parse_args()
-
 
 #================================
 #エントリーポイント
