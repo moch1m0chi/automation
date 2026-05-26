@@ -1,7 +1,9 @@
-import os
 import xlwings as xw
 import re
 from pathlib import Path
+import logging
+import traceback
+import time
 
 #-----------------------------------------------
 # 分岐ルール
@@ -57,6 +59,27 @@ def init_excel_app():
     app.display_alerts = False
     return app
 
+def setup_logging(base_dir):
+    log_path = base_dir / "pdf_log.txt"
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    # ファイル
+    fh = logging.FileHandler(log_path, encoding="utf-8")
+    # コンソール
+    ch = logging.StreamHandler()
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(message)s"
+    )
+
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
 #-----------------------------------------------
 # 関数
 #-----------------------------------------------
@@ -75,6 +98,7 @@ def export_payment_notification(ws, company, month, save_folder):
         log(f"支払通知書出力 : {pay_notice_name}.pdf")
     except Exception as e:
         log(f"エラー: {ws.name} / {e}")
+        logging.error(traceback.format_exc())
 
     return
 
@@ -101,6 +125,7 @@ def is_black_tab(ws):
         return ws.api.Tab.Color == 0 and ws.api.Tab.ColorIndex != -4142
     except Exception as e:
         log(f"エラー内容: {e}")
+        logging.error(traceback.format_exc())
         return False
     
 def is_payment_notification(ws):
@@ -119,6 +144,7 @@ def find_rule(wb_name, RULES):
     return DEFAULT_RULE
 
 # 変換系
+
 def clean_company(name): # 様は抜けて出力されるので注意！
     name = name.replace("\n", "")
     name = re.sub(r"様$", "", name)
@@ -172,17 +198,17 @@ def build_file_context(file_path, pdf_root):
 
 # ユーティリティ
 
-def paths(base_dir):
+# def paths(base_dir):
 
-    input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
-    pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
+#     input_folder = base_dir / "checked"   # Excelが入ってるフォルダ
+#     pdf_folder = base_dir / "pdf"         # PDF出力先のフォルダ
 
-    pdf_folder.mkdir(parents=True, exist_ok=True)   # フォルダがなかった場合は作成
+#     pdf_folder.mkdir(parents=True, exist_ok=True)   # フォルダがなかった場合は作成
 
-    return {
-        "input" : input_folder,
-        "output" : pdf_folder
-    }
+#     return {
+#         "input" : input_folder,
+#         "output" : pdf_folder
+#     }
 
 def get_month(file_name):
     month_match = re.search(r"(\d+)月", file_name)
@@ -223,7 +249,7 @@ def create_pdf_file_path(save_folder, pdf_name):
     return save_folder / f"{pdf_name}.pdf"
 
 def log(msg):
-    print(msg)
+    logging.info(msg)
 
 # pdf出力
 def output_payment_notification(ws, pdf_filepath):  # シート出力
@@ -246,67 +272,80 @@ EXECUTORS = {
 #-----------------------------------------------
 # 実行部
 #-----------------------------------------------
-
-try:
+def main():
     base_dir = Path(__file__).resolve().parent
 
-    paths = build_paths(base_dir)
+    setup_logging(base_dir)
 
-    app = init_excel_app()
+    logging.info("処理開始")
 
-    for file_path in paths["input"].iterdir():
+    try:
 
-        if is_out_of_scope(file_path.name):
-            continue
+        paths = build_paths(base_dir)
 
-        ctx = build_file_context(file_path, paths["output"])
+        app = init_excel_app()
 
-        wb = None
+        for file_path in paths["input"].iterdir():
 
-        try:
-            log(f"\nPDF変換開始: {ctx["file_name"]}")
+            if is_out_of_scope(file_path.name):
+                continue
 
-            # xlsxファイルを開く
-            wb = app.books.open(str(file_path))
+            ctx = build_file_context(file_path, paths["output"])
 
-            # 支払通知書以外のシートをまとめるリストを初期化
-            target_sheets = []
+            wb = None
 
-            for ws in wb.sheets:
+            try:
+                start = time.time()
+                log("==============================================================================")
+                log(f"PDF変換開始 : {ctx["file_name"]}")
 
-                if is_black_tab(ws):    # 黒タブ=既に終わっている案件はスルー
-                    log(f" →スキップ（黒タブ）: {ws.name}")
-                    continue
+                # xlsxファイルを開く
+                wb = app.books.open(str(file_path))
 
-                # 支払通知書は個別PDFで出力
-                if is_payment_notification(ws):
+                # 支払通知書以外のシートをまとめるリストを初期化
+                target_sheets = []
 
-                    export_payment_notification(ws, ctx["company"], ctx["month"], ctx["save_folder"])
+                for ws in wb.sheets:
 
-                # それ以外はまとめ用に追加
-                target_sheets.append(ws.name)
+                    if is_black_tab(ws):    # 黒タブ=既に終わっている案件はスルー
+                        log(f" →スキップ（黒タブ）: {ws.name}")
+                        continue
 
-            # 非表示シートを除外
-            target_sheets = exclude_invisible_sheets(wb, target_sheets)
+                    # 支払通知書は個別PDFで出力
+                    if is_payment_notification(ws):
 
-            # まとめたシートの一括出力
-            if target_sheets:
+                        export_payment_notification(ws, ctx["company"], ctx["month"], ctx["save_folder"])
 
-                rule = find_rule(ctx["base_name"], RULES)
-                
-                executor = EXECUTORS[rule["executor"]]
-                executor(wb, rule, target_sheets, ctx["company"], ctx["month"], ctx["save_folder"], ctx["pdf_name"])
+                    # それ以外はまとめ用に追加
+                    target_sheets.append(ws.name)
 
-                log("----pdf出力完了----")
+                # 非表示シートを除外
+                target_sheets = exclude_invisible_sheets(wb, target_sheets)
 
-        except Exception as e:
-            log(f"エラー: {ctx["file_name"]} / {e}")
+                # まとめたシートの一括出力
+                if target_sheets:
 
-        finally:
-            if wb:
-                wb.close()
+                    rule = find_rule(ctx["base_name"], RULES)
+                    
+                    executor = EXECUTORS[rule["executor"]]
+                    executor(wb, rule, target_sheets, ctx["company"], ctx["month"], ctx["save_folder"], ctx["pdf_name"])
 
-finally:
-    app.quit()
+                    elapsed = time.time() - start
+                    log(f"PDF変換完了 : {ctx['file_name']}({elapsed:.2f}s)")
+                    
 
-log("\n全PDF変換完了！")
+            except Exception as e:
+                log(f"エラー: {ctx["file_name"]} / {e}")
+                logging.error(traceback.format_exc())
+
+            finally:
+                if wb:
+                    wb.close()
+
+    finally:
+        app.quit()
+    log("==============================================================================")
+    log("全PDF変換完了！")
+
+if __name__ == "__main__":
+    main()

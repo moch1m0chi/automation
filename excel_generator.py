@@ -357,7 +357,7 @@ class ExcelProcessor:
         if self.transform_date_and_month(val) is not None:
             new_val = self.transform_date_and_month(val)
             self.write_cell(ws, base_row, base_col, r, c, new_val)
-            self.log(f" {new_val}を入力")
+            self.log(f"  更新完了 : {new_val}を入力")
 
     def process_month_update(self, ws, r, c, val, data): # 判定式を適用
         values, formats, formulas, base_row, base_col = data
@@ -390,15 +390,15 @@ class ExcelProcessor:
 
     def write_update_counts_to_sheet(self, ws, base_row, base_col, r, c, old_val, new_val):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
+        self.log(f"  更新完了 : {ws.name} シート {old_val} → {new_val} に更新")
 
     def write_update_payday(self, ws, old_val, new_val, base_row, base_col, r, c):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
+        self.log(f"  更新完了 : {ws.name} シート {old_val} → {new_val} に更新")
 
     def write_update_usage_text(self, ws, old_val, new_val, base_row, base_col, r, c):
         self.write_cell(ws, base_row, base_col, r, c, new_val)
-        self.log(f"  更新完了: {ws.name} シート {old_val} → {new_val} に更新")
+        self.log(f"  更新完了 : {ws.name} シート {old_val} → {new_val} に更新")
     
     #================================
     #ユーティリティ
@@ -600,7 +600,6 @@ class ExcelProcessor:
         ws.api.Tab.Color = 0
         self.log(f"{ws.name} は完了状態 → タブ色を変更")
 
- 
     def add_one_month(self, dt): # ひと月繰り上げ、セルの日付が月末であれば更新後も月末日を維持する
         year = dt.year
         month = dt.month + 1
@@ -664,7 +663,7 @@ class ExcelProcessor:
 
     def save_excel(self, file_name, output_folder, wb):
         new_file_name = self.transform_month_in_filename(file_name)  #ファイル名の月を繰り上げ
-        output_path = os.path.join(output_folder, new_file_name)
+        output_path = output_folder / new_file_name
 
         wb.save(output_path)
         self.log(f"保存完了 : {new_file_name}")
@@ -842,6 +841,7 @@ class ExcelProcessor:
 #================================
 #アプリケーション制御
 #================================
+
 def run_batch(input_folder, output_folder):
     app = init_excel_app()
 
@@ -853,7 +853,9 @@ def run_batch(input_folder, output_folder):
                 
             file_path = os.path.join(input_folder, file_name)
 
-            logging.info(f"\n処理開始: {file_name}")
+            logging.info("==============================================================================")
+
+            logging.info(f"処理開始 : {file_name}")
             wb = None
 
             try:
@@ -881,10 +883,11 @@ def run_batch(input_folder, output_folder):
     finally:
         app.quit()
 
-    logging.info("\n全処理完了！")
+    logging.info("==============================================================================")
+    logging.info("全処理完了！")
 
 def setup_logging(base_dir):
-    log_path = base_dir / "log.txt"
+    log_path = base_dir / "excel_log.txt"
 
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
